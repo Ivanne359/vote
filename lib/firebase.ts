@@ -11,9 +11,37 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+const validateFirebaseConfig = () => {
+  const requiredKeys = [
+    "apiKey",
+    "authDomain",
+    "projectId",
+    "storageBucket",
+    "messagingSenderId",
+    "appId",
+  ] as const;
+
+  const missingKeys = requiredKeys.filter(
+    (key) => !firebaseConfig[key]
+  );
+
+  if (missingKeys.length > 0) {
+    console.error(
+      "Firebase is not configured. Missing environment variables:",
+      missingKeys.map((key) => `NEXT_PUBLIC_FIREBASE_${key.toUpperCase()}`)
+    );
+    return false;
+  }
+
+  return true;
+};
+
 const createFirebaseApp = (): FirebaseApp | null => {
   if (typeof window === "undefined") return null;
-  if (!firebaseConfig.apiKey) return null;
+  
+  if (!validateFirebaseConfig()) {
+    return null;
+  }
 
   return getApps().length ? getApp() : initializeApp(firebaseConfig);
 };

@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  ELECTION_POSITIONS,
   subscribeElectionSettings,
   subscribeLiveAnalytics,
   type ElectionSettings,
@@ -23,9 +24,10 @@ const defaultAnalytics: LiveAnalytics = {
   totalVoters: 0,
   totalVotes: 0,
   turnoutPercentage: 0,
-  votesByPosition: {},
+  votesByPosition: Object.fromEntries(ELECTION_POSITIONS.map((pos) => [pos, 0])),
   activeSections: {},
   candidateCount: 0,
+  candidateVotes: {},
   recentVotes: [],
 };
 

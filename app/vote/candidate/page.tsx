@@ -169,6 +169,29 @@ export default function CandidatesPage() {
 	}, []);
 
 	useEffect(() => {
+		const database = db;
+		if (!database) return;
+		const id = formData.idNumber.trim();
+		if (!id) return;
+
+		let active = true;
+		const checkVoteStatus = async () => {
+			const voteRef = doc(database, "votes", id);
+			const voteSnap = await getDoc(voteRef);
+			if (!active) return;
+			if (voteSnap.exists()) {
+				setHasVoted(true);
+			}
+		};
+
+		checkVoteStatus();
+
+		return () => {
+			active = false;
+		};
+	}, [db, formData.idNumber]);
+
+	useEffect(() => {
 		if (!db) return;
 
 		const unsubscribe = onSnapshot(collection(db, "candidates"), (snapshot) => {

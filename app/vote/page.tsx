@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
+import { subscribeElectionSettings, type ElectionSettings } from "@/lib/adminRealtime";
 import {
   Megaphone,
   CalendarDays,
@@ -16,7 +17,6 @@ import {
   ArrowRight,
   Eye,
   BellRing,
-  Sparkles,
   ChevronRight,
 } from "lucide-react";
 
@@ -107,6 +107,8 @@ export default function HomePage() {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [hasReadPrivacy, setHasReadPrivacy] = useState(false);
   const [privacyAgreed, setPrivacyAgreed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
   const privacyNoticeRef = useRef<HTMLDivElement | null>(null);
 
   const { scrollYProgress } = useScroll();
@@ -150,6 +152,41 @@ export default function HomePage() {
     closePrivacyModal();
     router.push("/vote/candidate");
   };
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeElectionSettings((settings) => {
+      setElectionSettings(settings);
+    });
+    return () => unsub();
+  }, []);
+
+  const parseElectionDate = (date?: string, time?: string) => {
+    if (!date || !time) return null;
+    const parsed = new Date(`${date}T${time}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const formatDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const electionEndDate = electionSettings ? parseElectionDate(electionSettings.endDate, electionSettings.endTime) : null;
+  const electionStartDate = electionSettings ? parseElectionDate(electionSettings.startDate, electionSettings.startTime) : null;
+  const electionStatusLabel = electionSettings?.isActive ? 'Voting closes at' : 'Next voting window ends at';
+  const electionRemaining = electionEndDate ? Math.max(0, electionEndDate.getTime() - currentTime.getTime()) : null;
+  const electionCountdown = electionRemaining !== null
+    ? electionRemaining <= 0
+      ? 'Voting has closed'
+      : electionRemaining <= 60 * 60 * 1000
+        ? `${Math.max(1, Math.ceil(electionRemaining / (1000 * 60)))} min to close`
+        : electionRemaining <= 24 * 60 * 60 * 1000
+          ? `${Math.ceil(electionRemaining / (1000 * 60 * 60))} hours remaining`
+          : `${Math.ceil(electionRemaining / (1000 * 60 * 60 * 24))} days remaining`
+    : null;
 
   return (
     <main className="min-h-screen bg-[#FDFCFB] font-poppins pb-28 selection:bg-[#f05a28]/20">
@@ -267,6 +304,43 @@ export default function HomePage() {
 
       {/* ANNOUNCEMENTS */}
       <section id="announcements-section" className="max-w-6xl mx-auto pt-20 px-6">
+        {electionEndDate ? (
+          <motion.div
+            key={electionSettings?.isActive ? 'voting-open' : 'voting-closed'}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="mb-10 rounded-[2.5rem] border border-orange-100 bg-gradient-to-br from-[#fff7f2] via-white to-[#fff2e9] p-8 shadow-sm"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Election Countdown</p>
+                {electionSettings?.isActive ? (
+                  <>
+                    <h3 className="mt-3 text-3xl font-[900] tracking-tight text-gray-900">
+                      {electionStatusLabel} {formatTime(electionEndDate)}
+                    </h3>
+                    <p className="mt-2 text-sm font-semibold text-gray-600">{electionCountdown}</p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="mt-3 text-3xl font-[900] tracking-tight text-gray-900">
+                      Voting is now CLOSED
+                    </h3>
+                    <p className="mt-2 text-sm font-semibold text-gray-500">
+                      The election window has ended. Thank you for voting!
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="rounded-3xl bg-white/90 px-5 py-4 text-right shadow-sm">
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400">Current time</p>
+                <p className="mt-2 text-2xl font-black text-gray-900">{formatTime(currentTime)}</p>
+                <p className="text-sm font-semibold text-gray-500 mt-1">{formatDate(currentTime)}</p>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
         <div className="mb-14">
           <div className="flex items-center gap-3 mb-3">
             <span className="h-0.5 w-10 bg-[#f05a28]" />
@@ -566,12 +640,7 @@ function AnnouncementCard({
           ))}
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
-          <div className="flex items-center gap-2 text-gray-400 text-xs font-black uppercase tracking-wider">
-            <Sparkles size={14} className="text-[#f05a28]" />
-            Verified campus bulletin
-          </div>
-
+        <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4 pt-2">
           <button
             onClick={onOpen}
             className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-[#111] text-white font-black uppercase tracking-tight hover:bg-[#f05a28] transition-all shadow-xl"

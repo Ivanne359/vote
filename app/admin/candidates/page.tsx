@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
-import { Edit3, ImagePlus, Plus, Trash2, X, AlertCircle, User } from "lucide-react";
+import { Edit3, ImagePlus, Plus, Trash2, X, AlertCircle, CheckCircle2, User } from "lucide-react";
 import {
   ELECTION_POSITIONS,
   subscribeCandidates,
@@ -151,14 +151,12 @@ export default function AdminCandidatesPage() {
 
   const openEdit = (candidate: CandidateRecord) => {
     setEditing(candidate);
-    
-    // Retrieve photo from localStorage if it exists
-    let photoUrl = "";
-    if (typeof window !== "undefined") {
-      const storedPhoto = localStorage.getItem(`candidate_${candidate.id}_photo`);
-      photoUrl = storedPhoto ?? "";
-    }
-    
+
+    const photoUrlFromCandidate = candidate.photoUrl ?? "";
+    const storedPhoto = typeof window !== "undefined"
+      ? localStorage.getItem(`candidate_${candidate.id}_photo`)
+      : null;
+
     setForm({
       name: candidate.name,
       position: candidate.position,
@@ -171,7 +169,7 @@ export default function AdminCandidatesPage() {
       experience: candidate.experience ?? "",
       goals: candidate.goals ?? "",
       socialLinks: candidate.socialLinks ?? "",
-      photoUrl: photoUrl,
+      photoUrl: photoUrlFromCandidate || storedPhoto || "",
     });
     setModalOpen(true);
   };
@@ -247,7 +245,7 @@ export default function AdminCandidatesPage() {
           experience: form.experience.trim(),
           goals: form.goals.trim(),
           socialLinks: form.socialLinks.trim(),
-          photoUrl: "",
+          photoUrl: safePhotoUrl,
         },
         candidateId,
       );
@@ -318,9 +316,17 @@ export default function AdminCandidatesPage() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="fixed top-4 left-4 right-4 z-[160] rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 shadow-lg max-w-md mx-auto flex items-center gap-2"
+            className={`fixed top-4 left-4 right-4 z-[160] rounded-2xl px-4 py-3 text-sm font-bold shadow-lg max-w-md mx-auto flex items-center gap-2 ${
+              feedback.toLowerCase().includes("unable") || feedback.toLowerCase().includes("error") || feedback.toLowerCase().includes("missing")
+                ? "border border-red-200 bg-red-50 text-red-700"
+                : "border border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
           >
-            <AlertCircle size={18} className="flex-shrink-0" />
+            {feedback.toLowerCase().includes("unable") || feedback.toLowerCase().includes("error") || feedback.toLowerCase().includes("missing") ? (
+              <AlertCircle size={18} className="flex-shrink-0" />
+            ) : (
+              <CheckCircle2 size={18} className="flex-shrink-0" />
+            )}
             <span>{feedback}</span>
           </motion.div>
         )}

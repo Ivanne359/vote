@@ -38,6 +38,12 @@ export default function AdminElectionPage() {
     return `${form.startDate} ${form.startTime} - ${form.endDate} ${form.endTime}`;
   }, [form]);
 
+  const formatElectionTime = (date: string, time: string) => {
+    const parsed = new Date(`${date}T${time}`);
+    if (Number.isNaN(parsed.getTime())) return `${date} ${time}`;
+    return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  };
+
   const onSave = async () => {
     setBusy(true);
     setMessage("");
@@ -50,10 +56,8 @@ export default function AdminElectionPage() {
       });
       await pushSystemNotification({
         title: "Election schedule updated",
-        description: `${form.startDate} ${form.startTime} → ${form.endDate} ${form.endTime}`,
+        description: `Ends at ${formatElectionTime(form.endDate, form.endTime)}`,
         kind: "election",
-        actionHref: "/#announcements-section",
-        actionLabel: "Open Announcements",
       });
       setMessage("Election schedule saved.");
     } catch (error) {
@@ -71,10 +75,10 @@ export default function AdminElectionPage() {
       await setVotingActive(nextActive);
       await pushSystemNotification({
         title: nextActive ? "Voting is now OPEN" : "Voting is now CLOSED",
-        description: `${form.startDate} ${form.startTime} → ${form.endDate} ${form.endTime}`,
+        description: nextActive
+          ? `Voting ends at ${formatElectionTime(form.endDate, form.endTime)}`
+          : `Voting closed at ${formatElectionTime(form.endDate, form.endTime)}`,
         kind: "election",
-        actionHref: "/#announcements-section",
-        actionLabel: "View Announcement",
       });
       setMessage(nextActive ? "Voting opened successfully." : "Voting closed successfully.");
     } catch (error) {

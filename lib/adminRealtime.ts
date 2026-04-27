@@ -90,6 +90,7 @@ export interface LiveAnalytics {
   votesByPosition: Record<string, number>;
   activeSections: Record<string, number>;
   candidateCount: number;
+  candidateVotes: Record<string, number>;
   recentVotes: VoteRecord[];
 }
 
@@ -335,6 +336,7 @@ export const subscribeLiveAnalytics = (
       votesByPosition: Object.fromEntries(ELECTION_POSITIONS.map((pos) => [pos, 0])),
       activeSections: {},
       candidateCount: 0,
+      candidateVotes: {},
       recentVotes: [],
     });
     return () => undefined;
@@ -356,11 +358,13 @@ export const subscribeLiveAnalytics = (
     );
 
     const activeSections: Record<string, number> = {};
+    const candidateVotes: Record<string, number> = {};
 
     votesInRange.forEach((vote) => {
       Object.entries(vote.selections || {}).forEach(([position, choice]) => {
         if (!choice || choice === "abstain") return;
         votesByPosition[position] = (votesByPosition[position] ?? 0) + 1;
+        candidateVotes[choice] = (candidateVotes[choice] ?? 0) + 1;
       });
 
       const key = vote.section || "Unspecified";
@@ -377,6 +381,7 @@ export const subscribeLiveAnalytics = (
       votesByPosition,
       activeSections,
       candidateCount,
+      candidateVotes,
       recentVotes: votesInRange
         .slice()
         .sort((a, b) => {

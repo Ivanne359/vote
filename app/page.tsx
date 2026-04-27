@@ -164,11 +164,16 @@ export default function AuthPage() {
         const savedEmail = userData.email;
         const savedName = (userData.fullName || userData.name || "Voter") as string;
         const savedStudentId = (userData.studentId || studentId) as string;
+        const savedProfilePic = (userData.profilePic || null) as string | null;
 
         await signInWithEmailAndPassword(auth, savedEmail, password);
 
         localStorage.setItem("voterName", savedName);
         localStorage.setItem("voterId", savedStudentId);
+        localStorage.setItem("voterEmail", savedEmail);
+        if (savedProfilePic) {
+          localStorage.setItem("voterPic", savedProfilePic);
+        }
 
         router.push('/vote');
       } else {

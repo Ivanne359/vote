@@ -2,8 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Activity, BarChart3, Gauge, Users, Vote } from "lucide-react";
-import { ELECTION_POSITIONS, subscribeLiveAnalytics, type LiveAnalytics } from "@/lib/adminRealtime";
+import { Activity, BarChart3, Download, FileSpreadsheet, Gauge, Users, Vote } from "lucide-react";
+import {
+  ELECTION_POSITIONS,
+  subscribeCandidates,
+  subscribeElectionSettings,
+  subscribeLiveAnalytics,
+  type CandidateRecord,
+  type ElectionSettings,
+  type LiveAnalytics,
+} from "@/lib/adminRealtime";
+import { downloadElectionResultsExcel } from "@/lib/adminExcelReport";
 
 type DateRange = "today" | "week" | "month";
 
@@ -11,20 +20,78 @@ const emptyAnalytics: LiveAnalytics = {
   totalVoters: 0,
   totalVotes: 0,
   turnoutPercentage: 0,
-  votesByPosition: {},
+  votesByPosition: Object.fromEntries(ELECTION_POSITIONS.map((pos) => [pos, 0])),
   activeSections: {},
   candidateCount: 0,
+  candidateVotes: {},
   recentVotes: [],
+};
+
+const defaultElection: ElectionSettings = {
+  startDate: new Date().toISOString().split("T")[0],
+  endDate: new Date().toISOString().split("T")[0],
+  startTime: "09:00",
+  endTime: "17:00",
+  isActive: false,
 };
 
 export default function AdminAnalyticsPage() {
   const [range, setRange] = useState<DateRange>("week");
   const [analytics, setAnalytics] = useState<LiveAnalytics>(emptyAnalytics);
+  const [candidates, setCandidates] = useState<CandidateRecord[]>([]);
+  const [election, setElection] = useState<ElectionSettings>(defaultElection);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [lastReportName, setLastReportName] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = subscribeLiveAnalytics(range, setAnalytics);
     return () => unsub();
   }, [range]);
+
+  useEffect(() => {
+    const unsubCandidates = subscribeCandidates(setCandidates);
+    return () => unsubCandidates();
+  }, []);
+
+  useEffect(() => {
+    const unsubElection = subscribeElectionSettings(setElection);
+    return () => unsubElection();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const endDateTime = useMemo(() => {
+    const parsed = new Date(`${election.endDate}T${election.endTime}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, [election.endDate, election.endTime]);
+
+  const hasElectionEnded = useMemo(() => {
+    if (!endDateTime) return !election.isActive;
+    return !election.isActive || nowTick >= endDateTime.getTime();
+  }, [election.isActive, endDateTime, nowTick]);
+
+  const handleDownloadReport = () => {
+    if (!hasElectionEnded) {
+      setReportError("Report download is available only after voting closes.");
+      return;
+    }
+
+    try {
+      setReportError(null);
+      const fileName = downloadElectionResultsExcel({
+        candidates,
+        candidateVotes: analytics.candidateVotes,
+        electionSettings: election,
+      });
+      setLastReportName(fileName);
+    } catch {
+      setReportError("Failed to generate Excel report. Please try again.");
+    }
+  };
 
   const maxPositionVotes = useMemo(() => {
     const values = Object.values(analytics.votesByPosition);
@@ -34,6 +101,28 @@ export default function AdminAnalyticsPage() {
   const sortedSections = useMemo(() => {
     return Object.entries(analytics.activeSections).sort((a, b) => b[1] - a[1]).slice(0, 10);
   }, [analytics.activeSections]);
+
+  const topCandidates = useMemo(() => {
+    return ELECTION_POSITIONS.map((position) => {
+      const candidatesForPosition = candidates.filter((candidate) => candidate.position === position);
+      if (candidatesForPosition.length === 0) {
+        return { position, name: "No candidate", votes: 0 };
+      }
+
+      const leader = candidatesForPosition.reduce(
+        (best, candidate) => {
+          const votes = analytics.candidateVotes[candidate.id] ?? 0;
+          if (!best || votes > best.votes) {
+            return { position, name: candidate.name, votes };
+          }
+          return best;
+        },
+        null as { position: string; name: string; votes: number } | null,
+      );
+
+      return leader ?? { position, name: "No candidate", votes: 0 };
+    });
+  }, [analytics.candidateVotes, candidates]);
 
   return (
     <div className="space-y-8">
@@ -49,15 +138,36 @@ export default function AdminAnalyticsPage() {
             <p className="mt-3 text-sm font-medium text-gray-600">Metrics update automatically as new users register and votes are submitted.</p>
           </div>
 
-          <select
-            value={range}
-            onChange={(event) => setRange(event.target.value as DateRange)}
-            className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm font-black text-gray-800 outline-none focus:border-[#f05a28]"
-          >
-            <option value="today">Today</option>
-            <option value="week">Last 7 Days</option>
-            <option value="month">Last 30 Days</option>
-          </select>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              value={range}
+              onChange={(event) => setRange(event.target.value as DateRange)}
+              className="h-11 rounded-xl border border-gray-300 bg-white px-4 text-sm font-black text-gray-800 outline-none focus:border-[#f05a28]"
+            >
+              <option value="today">Today</option>
+              <option value="week">Last 7 Days</option>
+              <option value="month">Last 30 Days</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={handleDownloadReport}
+              disabled={!hasElectionEnded}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#111] px-4 text-xs font-black uppercase tracking-wide text-white transition hover:bg-[#f05a28] disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600"
+            >
+              <Download size={16} /> Download .xlsx
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <div className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-wide ${hasElectionEnded ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+            <FileSpreadsheet size={14} /> {hasElectionEnded ? "Report download ready" : "Report locked until voting ends"}
+          </div>
+          {lastReportName ? (
+            <p className="text-xs font-semibold text-gray-600">Latest file: {lastReportName}</p>
+          ) : null}
+          {reportError ? <p className="text-xs font-semibold text-red-600">{reportError}</p> : null}
         </div>
       </motion.section>
 
@@ -124,12 +234,29 @@ export default function AdminAnalyticsPage() {
           </div>
         </motion.article>
 
-        <motion.article
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
-        >
+      <motion.article
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
+      >
+        <h2 className="text-2xl font-[900] text-gray-900">Leading Candidates</h2>
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          {topCandidates.map((leader) => (
+            <div key={leader.position} className="rounded-3xl border border-gray-100 bg-gray-50 p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">{leader.position}</p>
+              <p className="mt-3 text-lg font-black text-gray-900">{leader.name}</p>
+              <p className="mt-1 text-sm font-semibold text-gray-500">{leader.votes} vote{leader.votes === 1 ? "" : "s"}</p>
+            </div>
+          ))}
+        </div>
+      </motion.article>
+
+      <motion.article
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
+      >
           <h2 className="text-2xl font-[900] text-gray-900">Most Active Sections</h2>
           <div className="mt-5 space-y-3">
             {sortedSections.length === 0 ? (

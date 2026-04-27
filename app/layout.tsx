@@ -16,7 +16,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${poppins.variable} font-sans bg-[#FAFAFA] text-slate-900`}>
+      <body suppressHydrationWarning className={`${poppins.variable} font-sans bg-[#FAFAFA] text-slate-900`}>
         <div className="flex flex-col min-h-screen">
           <main className="flex-grow">
             {children}

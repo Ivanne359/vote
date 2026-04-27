@@ -14,7 +14,6 @@ import {
   ShieldCheck,
   Camera,
   Mail,
-  Fingerprint,
   Moon,
   Globe,
   Lock,
@@ -22,11 +21,17 @@ import {
   Smartphone,
   CalendarClock,
   Clock3,
-  ArrowRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '@/lib/firebase';
-import { subscribeSystemNotifications, type SystemNotification } from '@/lib/adminRealtime';
+import { db, storage } from '@/lib/firebase';
+import { collection, query, where, getDocs, limit, doc, updateDoc } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import {
+  subscribeElectionSettings,
+  subscribeSystemNotifications,
+  type ElectionSettings,
+  type SystemNotification,
+} from '@/lib/adminRealtime';
 
 type LiveNotification = {
   id: string;
@@ -39,18 +44,24 @@ type LiveNotification = {
 
 const READ_NOTIFICATIONS_KEY = 'cetvote_read_notifications';
 const DISMISSED_NOTIFICATIONS_KEY = 'cetvote_dismissed_notifications';
+const LAST_TOAST_NOTIFICATION_ID = 'cetvote_last_toast_notification_id';
 
 export default function Navbar() {
   const router = useRouter();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [toastNotification, setToastNotification] = useState<LiveNotification | null>(null);
+  const [toastCountdown, setToastCountdown] = useState<string | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [voterId, setVoterId] = useState('00000000');
   const [voterName, setVoterName] = useState('Guest Voter');
+  const [voterEmail, setVoterEmail] = useState('');
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [userDocId, setUserDocId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<LiveNotification[]>([]);
+  const [localNotifications, setLocalNotifications] = useState<LiveNotification[]>([]);
+  const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
 
@@ -61,12 +72,58 @@ export default function Navbar() {
   useEffect(() => {
     const savedId = localStorage.getItem('voterId');
     const savedName = localStorage.getItem('voterName');
+    const savedEmail = localStorage.getItem('voterEmail');
     const savedPic = localStorage.getItem('voterPic');
 
     if (savedId) setVoterId(savedId);
     if (savedName) setVoterName(savedName);
+    if (savedEmail) setVoterEmail(savedEmail);
     if (savedPic) setProfilePic(savedPic);
   }, []);
+
+  useEffect(() => {
+    if (!db || !voterId || voterId === '00000000') return;
+
+    const loadUserProfile = async () => {
+      try {
+        const userQuery = query(
+          collection(db, 'users'),
+          where('studentId', '==', voterId),
+          limit(1)
+        );
+        const snapshot = await getDocs(userQuery);
+        if (snapshot.empty) return;
+
+        const userDoc = snapshot.docs[0];
+        const userData = userDoc.data() as {
+          fullName?: string;
+          email?: string;
+          profilePic?: string;
+        };
+
+        setUserDocId(userDoc.id);
+
+        if (userData.fullName) {
+          setVoterName(userData.fullName);
+          localStorage.setItem('voterName', userData.fullName);
+        }
+
+        if (userData.email) {
+          setVoterEmail(userData.email);
+          localStorage.setItem('voterEmail', userData.email);
+        }
+
+        if (userData.profilePic) {
+          setProfilePic(userData.profilePic);
+          localStorage.setItem('voterPic', userData.profilePic);
+        }
+      } catch {
+        // Keep existing local profile data if cloud lookup fails.
+      }
+    };
+
+    void loadUserProfile();
+  }, [voterId]);
 
   useEffect(() => {
     try {
@@ -91,20 +148,18 @@ export default function Navbar() {
           title: item.title,
           description: item.description,
           kind: 'election',
-          actionHref: item.actionHref,
-          actionLabel: item.actionLabel,
         }));
 
       setNotifications(mappedItems);
 
       const latestElection = mappedItems[0];
-      if (latestElection && previousToastIdsRef.current[0] !== latestElection.id) {
-        previousToastIdsRef.current = [latestElection.id, ...previousToastIdsRef.current].slice(0, 5);
-        setToastNotification({
-          ...latestElection,
-          actionHref: latestElection.actionHref || '/#announcements-section',
-          actionLabel: latestElection.actionLabel || 'View Announcement',
-        });
+      const lastToastId = typeof window !== 'undefined' ? localStorage.getItem(LAST_TOAST_NOTIFICATION_ID) : null;
+
+      if (latestElection && latestElection.id !== lastToastId) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LAST_TOAST_NOTIFICATION_ID, latestElection.id);
+        }
+        setToastNotification(latestElection);
       }
     });
 
@@ -112,9 +167,141 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
+    const unsub = subscribeElectionSettings((settings) => {
+      setElectionSettings(settings);
+    });
+    return () => unsub();
+  }, []);
+
+  const alertStateRef = useRef({
+    oneHourSent: false,
+    thirtyMinSent: false,
+    closedSent: false,
+    scheduleKey: '',
+  });
+
+  const getEndDate = (settings: ElectionSettings | null) => {
+    if (!settings) return null;
+    const date = new Date(`${settings.endDate}T${settings.endTime}`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const getLocalNotificationId = (type: 'oneHour' | 'thirtyMin' | 'closed', settings: ElectionSettings) => {
+    return `local-election-${type}-${settings.startDate}-${settings.startTime}-${settings.endDate}-${settings.endTime}-${settings.isActive}`;
+  };
+
+  const addLocalElectionNotification = (notification: LiveNotification) => {
+    setLocalNotifications((prev) => {
+      if (prev.some((item) => item.id === notification.id)) return prev;
+      return [notification, ...prev];
+    });
+    setToastNotification(notification);
+  };
+
+  useEffect(() => {
+    if (!electionSettings) return;
+
+    const scheduleKey = `${electionSettings.startDate}-${electionSettings.startTime}-${electionSettings.endDate}-${electionSettings.endTime}-${electionSettings.isActive}`;
+    if (alertStateRef.current.scheduleKey !== scheduleKey) {
+      alertStateRef.current = {
+        oneHourSent: false,
+        thirtyMinSent: false,
+        closedSent: false,
+        scheduleKey,
+      };
+      setLocalNotifications([]);
+    }
+
+    const endDate = getEndDate(electionSettings);
+    if (!endDate || !electionSettings.isActive) return;
+
+    const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+    const checkAlerts = () => {
+      const now = new Date();
+      const diff = endDate.getTime() - now.getTime();
+      if (diff <= 0 && !alertStateRef.current.closedSent) {
+        alertStateRef.current.closedSent = true;
+        addLocalElectionNotification({
+          id: getLocalNotificationId('closed', electionSettings),
+          title: 'Voting is now CLOSED',
+          description: `Voting closed at ${formatTime(endDate)}`,
+          kind: 'election',
+        });
+        return;
+      }
+      if (diff <= 30 * 60 * 1000 && diff > 0 && !alertStateRef.current.thirtyMinSent) {
+        alertStateRef.current.thirtyMinSent = true;
+        addLocalElectionNotification({
+          id: getLocalNotificationId('thirtyMin', electionSettings),
+          title: 'Voting ends in 30 minutes',
+          description: `Voting ends at ${formatTime(endDate)}`,
+          kind: 'election',
+        });
+        return;
+      }
+      if (diff <= 60 * 60 * 1000 && diff > 30 * 60 * 1000 && !alertStateRef.current.oneHourSent) {
+        alertStateRef.current.oneHourSent = true;
+        addLocalElectionNotification({
+          id: getLocalNotificationId('oneHour', electionSettings),
+          title: 'Voting ends in 1 hour',
+          description: `Voting ends at ${formatTime(endDate)}`,
+          kind: 'election',
+        });
+        return;
+      }
+    };
+
+    checkAlerts();
+    const interval = window.setInterval(checkAlerts, 20 * 1000);
+    return () => window.clearInterval(interval);
+  }, [electionSettings]);
+
+  useEffect(() => {
     if (!toastNotification) return;
     const timer = setTimeout(() => setToastNotification(null), 7000);
     return () => clearTimeout(timer);
+  }, [toastNotification]);
+
+  useEffect(() => {
+    if (!toastNotification?.description) {
+      setToastCountdown(null);
+      return;
+    }
+
+    const parseEndDateFromDescription = (description: string): Date | null => {
+      const parts = description.split("→").map((part) => part.trim());
+      const endPart = parts[1] ?? parts[0];
+      const parsed = new Date(endPart.replace(" ", "T"));
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const endDate = parseEndDateFromDescription(toastNotification.description);
+    const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+    const updateCountdown = () => {
+      if (!endDate) {
+        setToastCountdown(null);
+        return;
+      }
+
+      const now = new Date();
+      const diff = endDate.getTime() - now.getTime();
+      if (diff <= 0) {
+        setToastCountdown('Voting is now closed');
+        return;
+      }
+      if (diff <= 30 * 60 * 1000) {
+        const minutes = Math.max(1, Math.ceil(diff / (1000 * 60)));
+        setToastCountdown(`Voting ends in ${minutes} minute${minutes === 1 ? '' : 's'}`);
+        return;
+      }
+      setToastCountdown(`Ends at ${formatTime(endDate)}`);
+    };
+
+    updateCountdown();
+    const interval = window.setInterval(updateCountdown, 1000);
+    return () => window.clearInterval(interval);
   }, [toastNotification]);
 
   useEffect(() => {
@@ -131,7 +318,8 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const visibleNotifications = notifications.filter((item) => !dismissedNotificationIds.includes(item.id));
+  const allNotifications = [...localNotifications, ...notifications];
+  const visibleNotifications = allNotifications.filter((item) => !dismissedNotificationIds.includes(item.id));
   const unreadCount = visibleNotifications.filter((item) => !readNotificationIds.includes(item.id)).length;
 
   const persistReadNotificationIds = (next: string[]) => {
@@ -181,14 +369,31 @@ export default function Navbar() {
   const toastToneClasses = toastIsOpen
     ? 'border-emerald-200 bg-gradient-to-br from-emerald-600 via-emerald-500 to-lime-500 shadow-[0_24px_70px_-20px_rgba(16,185,129,0.45)]'
     : 'border-red-200 bg-gradient-to-br from-red-600 via-red-500 to-orange-500 shadow-[0_24px_70px_-20px_rgba(220,38,38,0.45)]';
-  const toastActionClasses = toastIsOpen ? 'text-emerald-600' : 'text-red-600';
   const toastAccentLine = toastIsOpen ? 'bg-white/45' : 'bg-white/40';
 
   const handleLogout = () => {
     localStorage.removeItem('voterId');
     localStorage.removeItem('voterName');
+    localStorage.removeItem('voterEmail');
     localStorage.removeItem('voterPic');
     router.push('/');
+  };
+
+  const resolveUserDocId = async () => {
+    if (userDocId) return userDocId;
+    if (!db || !voterId || voterId === '00000000') return null;
+
+    const userQuery = query(
+      collection(db, 'users'),
+      where('studentId', '==', voterId),
+      limit(1)
+    );
+    const snapshot = await getDocs(userQuery);
+    if (snapshot.empty) return null;
+
+    const resolvedId = snapshot.docs[0].id;
+    setUserDocId(resolvedId);
+    return resolvedId;
   };
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -200,6 +405,31 @@ export default function Navbar() {
       const base64String = reader.result as string;
       setProfilePic(base64String);
       localStorage.setItem('voterPic', base64String);
+
+      void (async () => {
+        if (!db || !storage) return;
+
+        try {
+          const resolvedDocId = await resolveUserDocId();
+          if (!resolvedDocId) return;
+
+          const storageRef = ref(storage, `profile-pictures/${resolvedDocId}/avatar`);
+          await uploadBytes(storageRef, file, {
+            contentType: file.type || 'image/jpeg',
+          });
+
+          const downloadURL = await getDownloadURL(storageRef);
+          await updateDoc(doc(db, 'users', resolvedDocId), {
+            profilePic: downloadURL,
+            profilePicUpdatedAt: new Date().toISOString(),
+          });
+
+          setProfilePic(downloadURL);
+          localStorage.setItem('voterPic', downloadURL);
+        } catch (error) {
+          console.error('Failed to sync profile picture to cloud:', error);
+        }
+      })();
     };
     reader.readAsDataURL(file);
   };
@@ -224,17 +454,8 @@ export default function Navbar() {
                   <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/85">Realtime Election Alert</p>
                   <h3 className="mt-1 text-[13px] font-black leading-tight text-white">{toastNotification.title}</h3>
                   <p className="mt-1 text-[11px] font-medium leading-relaxed text-white/85">{toastNotification.description}</p>
-                  {toastNotification.actionHref ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setToastNotification(null);
-                        router.push(toastNotification.actionHref!);
-                      }}
-                      className={`mt-2.5 inline-flex items-center gap-2 rounded-full bg-white px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] ${toastActionClasses}`}
-                    >
-                      {toastNotification.actionLabel || 'View'} <ArrowRight size={12} />
-                    </button>
+                  {toastCountdown ? (
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-white/90">{toastCountdown}</p>
                   ) : null}
                 </div>
                 <button
@@ -343,27 +564,10 @@ export default function Navbar() {
                                     {!isRead ? <span className="h-2 w-2 rounded-full bg-red-500" /> : null}
                                   </div>
                                   <p className="text-[11px] font-medium leading-relaxed text-gray-500">{item.description}</p>
-                                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-gray-600">
-                                    <Clock3 size={13} className="text-emerald-600" />
-                                    <span>Tap to go to Campus Announcements.</span>
-                                  </div>
                                 </button>
                               </div>
 
                               <div className="absolute right-2.5 top-2.5 flex items-center gap-1">
-                                {item.actionLabel ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => openNotification(item)}
-                                    className={`rounded-full border bg-white px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] ${
-                                      isElectionOpen ? 'border-emerald-100 text-emerald-600 hover:bg-emerald-50' : 'border-red-100 text-red-600 hover:bg-red-50'
-                                    }`}
-                                  >
-                                    <span className="inline-flex items-center gap-1">
-                                      {item.actionLabel} <ArrowRight size={12} />
-                                    </span>
-                                  </button>
-                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() => dismissNotification(item.id)}
@@ -417,24 +621,50 @@ export default function Navbar() {
                     </div>
 
                     <div className="space-y-1">
-                      <button
+                      <motion.button
+                        initial="rest"
+                        whileHover="hover"
+                        animate="rest"
                         onClick={() => {
                           setShowProfileModal(true);
                           setIsDropdownOpen(false);
                         }}
                         className="flex w-full items-center gap-3 rounded-2xl px-5 py-3.5 text-[13px] font-bold text-gray-600 transition-all duration-200 hover:bg-[#f05a28]/5 hover:text-[#f05a28]"
                       >
-                        <UserCircle size={20} /> Profile Details
-                      </button>
-                      <button
+                        <motion.span
+                          variants={{
+                            rest: { x: 0, scale: 1 },
+                            hover: { x: 4, scale: 1.08 },
+                          }}
+                          transition={{ type: 'spring', stiffness: 280, damping: 18 }}
+                          className="inline-flex"
+                        >
+                          <UserCircle size={20} />
+                        </motion.span>
+                        Profile Details
+                      </motion.button>
+                      <motion.button
+                        initial="rest"
+                        whileHover="hover"
+                        animate="rest"
                         onClick={() => {
                           setShowSettingsModal(true);
                           setIsDropdownOpen(false);
                         }}
                         className="flex w-full items-center gap-3 rounded-2xl px-5 py-3.5 text-[13px] font-bold text-gray-600 transition-all duration-200 hover:bg-[#f05a28]/5 hover:text-[#f05a28]"
                       >
-                        <Settings size={20} /> Settings
-                      </button>
+                        <motion.span
+                          variants={{
+                            rest: { rotate: 0, scale: 1 },
+                            hover: { rotate: 90, scale: 1.05 },
+                          }}
+                          transition={{ duration: 0.35, ease: 'easeOut' }}
+                          className="inline-flex"
+                        >
+                          <Settings size={20} />
+                        </motion.span>
+                        Settings
+                      </motion.button>
 
                       <div className="mx-4 my-2 h-px bg-gray-100/60" />
 
@@ -470,10 +700,10 @@ export default function Navbar() {
               className="relative w-full max-w-lg overflow-hidden rounded-[3rem] bg-white shadow-2xl"
             >
               <div className="flex items-center justify-between p-8 pb-0">
-                <h2 className="text-2xl font-[900] italic uppercase tracking-tight">
+                <h2 className="text-2xl font-[900] italic uppercase tracking-tight text-black">
                   Voter <span className="text-[#f05a28]">Profile</span>
                 </h2>
-                <button onClick={() => setShowProfileModal(false)} className="rounded-full bg-gray-50 p-3 transition-colors hover:bg-gray-100">
+                <button onClick={() => setShowProfileModal(false)} className="rounded-full bg-black p-3 text-white transition-colors hover:bg-gray-900">
                   <X size={20} />
                 </button>
               </div>
@@ -503,15 +733,8 @@ export default function Navbar() {
                   <div className="flex items-center gap-4 rounded-3xl border border-gray-100 bg-gray-50 p-5">
                     <Mail className="text-gray-400" size={20} />
                     <div>
-                      <p className="mb-1 text-[10px] font-black uppercase leading-none text-gray-400">Email Address</p>
-                      <p className="text-sm font-bold text-gray-700">{voterId}@hcdc.edu.ph</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 rounded-3xl border border-gray-100 bg-gray-50 p-5">
-                    <Fingerprint className="text-gray-400" size={20} />
-                    <div>
-                      <p className="mb-1 text-[10px] font-black uppercase leading-none text-gray-400">Biometric Status</p>
-                      <p className="text-sm font-bold text-green-500">Encrypted & Active</p>
+                      <p className="mb-1 text-[10px] font-black uppercase leading-none text-gray-400">Account Email</p>
+                      <p className="text-sm font-bold text-gray-700">{voterEmail || 'No email found'}</p>
                     </div>
                   </div>
                 </div>

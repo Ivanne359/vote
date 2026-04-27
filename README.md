@@ -2,6 +2,8 @@
 
 A [Next.js](https://nextjs.org) project for online voting with Firebase integration.
 
+**Repository**: [github.com/Ivanne359/vote](https://github.com/Ivanne359/vote)
+
 ## Environment Variables Setup
 
 ### Local Development

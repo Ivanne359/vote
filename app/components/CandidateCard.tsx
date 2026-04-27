@@ -31,12 +31,7 @@ export default function CandidateCard({
   onVoteNow,
   candidateId,
 }: CandidateCardProps) {
-  // Try to get photo from localStorage first
-  let photoSrc = image;
-  if (!photoSrc && candidateId) {
-    const storedPhoto = typeof window !== "undefined" ? localStorage.getItem(`candidate_${candidateId}_photo`) : null;
-    photoSrc = storedPhoto || undefined;
-  }
+  const photoSrc = image;
 
   return (
     <motion.div

@@ -6,7 +6,6 @@ import Link from "next/link";
 import {
   Activity,
   BarChart3,
-  CalendarClock,
   CheckCircle2,
   Users,
   Vote,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   ELECTION_POSITIONS,
+  resolveElectionWindow,
   subscribeElectionSettings,
   subscribeLiveAnalytics,
   type ElectionSettings,
@@ -42,6 +42,7 @@ const defaultElection: ElectionSettings = {
 export default function AdminDashboardPage() {
   const [analytics, setAnalytics] = useState<LiveAnalytics>(defaultAnalytics);
   const [election, setElection] = useState<ElectionSettings>(defaultElection);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const unsubAnalytics = subscribeLiveAnalytics("week", setAnalytics);
@@ -52,6 +53,26 @@ export default function AdminDashboardPage() {
       unsubElection();
     };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const electionWindow = useMemo(
+    () => resolveElectionWindow(election.startDate, election.startTime, election.endDate, election.endTime),
+    [election.endDate, election.endTime, election.startDate, election.startTime],
+  );
+
+  const electionStart = electionWindow.start;
+  const electionEnd = electionWindow.end;
+
+  const votingStatus = useMemo(() => {
+    if (!electionStart || !electionEnd || electionEnd <= electionStart) return "INVALID";
+    if (currentTime < electionStart) return "SCHEDULED";
+    if (currentTime <= electionEnd) return "OPEN";
+    return "CLOSED";
+  }, [currentTime, electionEnd, electionStart]);
 
   const topSection = useMemo(() => {
     const ranked = Object.entries(analytics.activeSections).sort((a, b) => b[1] - a[1]);
@@ -102,7 +123,7 @@ export default function AdminDashboardPage() {
       >
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Control Center</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Dashboard</p>
             <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic md:text-5xl">Admin Dashboard</h1>
             <p className="mt-3 max-w-2xl text-sm font-medium text-gray-600">
               Live snapshot of turnout, candidates, and election activity. All cards below refresh in realtime from Firebase.
@@ -110,8 +131,8 @@ export default function AdminDashboardPage() {
           </div>
           <div className="rounded-2xl border border-orange-100 bg-white/80 px-5 py-4 shadow-sm">
             <p className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400">Voting Status</p>
-            <p className={`mt-2 text-lg font-black ${election.isActive ? "text-green-600" : "text-gray-600"}`}>
-              {election.isActive ? "OPEN" : "CLOSED"}
+            <p className={`mt-2 text-lg font-black ${votingStatus === "OPEN" ? "text-green-600" : votingStatus === "SCHEDULED" ? "text-amber-700" : "text-gray-600"}`}>
+              {votingStatus}
             </p>
             <p className="mt-1 text-xs font-semibold text-gray-500">
               {election.startDate} {election.startTime} - {election.endDate} {election.endTime}
@@ -149,7 +170,7 @@ export default function AdminDashboardPage() {
         })}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
+      <section className="grid gap-6 lg:grid-cols-1">
         <motion.article
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -179,33 +200,6 @@ export default function AdminDashboardPage() {
                 </div>
               ))
             )}
-          </div>
-        </motion.article>
-
-        <motion.article
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-[900] text-gray-900">Quick Actions</h2>
-            <CalendarClock className="text-[#f05a28]" size={22} />
-          </div>
-          <div className="mt-6 grid gap-3">
-            <Link href="/admin/candidates" className="rounded-2xl border border-orange-100 bg-orange-50 px-4 py-4 text-sm font-black text-orange-700 transition hover:bg-orange-100">
-              Manage Candidate Profiles
-            </Link>
-            <Link href="/admin/election" className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm font-black text-blue-700 transition hover:bg-blue-100">
-              Open, Close, or Reset Election
-            </Link>
-            <Link href="/admin/analytics" className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 text-sm font-black text-emerald-700 transition hover:bg-emerald-100">
-              View Turnout and Section Activity
-            </Link>
-            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Most Active Section</p>
-              <p className="mt-2 text-xl font-black text-gray-900">{topSection}</p>
-            </div>
           </div>
         </motion.article>
       </section>

@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { ELECTION_POSITIONS, type CandidateRecord, type ElectionSettings } from "@/lib/adminRealtime";
+import { ELECTION_POSITIONS, resolveElectionWindow, type CandidateRecord, type ElectionSettings } from "@/lib/adminRealtime";
 
 type ReportContext = {
   candidates: CandidateRecord[];
@@ -129,6 +129,22 @@ export const downloadElectionResultsExcel = ({
   const generatedAt = new Date();
   const timestamp = generatedAt.toISOString().replace(/[:.]/g, "-");
 
+  const electionWindow = resolveElectionWindow(
+    electionSettings?.startDate,
+    electionSettings?.startTime,
+    electionSettings?.endDate,
+    electionSettings?.endTime,
+  );
+  const scheduleStart = electionWindow.start;
+  const scheduleEnd = electionWindow.end;
+  const votingStatus = !scheduleStart || !scheduleEnd
+    ? "UNKNOWN"
+    : generatedAt < scheduleStart
+      ? "SCHEDULED"
+      : generatedAt <= scheduleEnd
+        ? "OPEN"
+        : "CLOSED";
+
   const { detailedRows, winnerSummaryRows } = buildReportRows({
     candidates,
     candidateVotes,
@@ -148,7 +164,7 @@ export const downloadElectionResultsExcel = ({
     },
     {
       Field: "Voting Status",
-      Value: electionSettings?.isActive ? "OPEN" : "CLOSED",
+      Value: votingStatus,
     },
     {
       Field: "Total Candidates",

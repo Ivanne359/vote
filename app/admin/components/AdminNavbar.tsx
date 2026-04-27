@@ -14,7 +14,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import { subscribeElectionSettings } from "@/lib/adminRealtime";
+import { resolveElectionWindow, subscribeElectionSettings, type ElectionSettings } from "@/lib/adminRealtime";
 
 const ADMIN_MENU = [
   { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
@@ -28,7 +28,8 @@ export default function AdminNavbar() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
-  const [isVotingActive, setIsVotingActive] = useState(false);
+  const [settings, setSettings] = useState<ElectionSettings | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const adminSession = localStorage.getItem("adminSession");
@@ -40,10 +41,20 @@ export default function AdminNavbar() {
 
   useEffect(() => {
     const unsub = subscribeElectionSettings((settings) => {
-      setIsVotingActive(Boolean(settings.isActive));
+      setSettings(settings);
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const electionWindow = resolveElectionWindow(settings?.startDate, settings?.startTime, settings?.endDate, settings?.endTime);
+  const start = electionWindow.start;
+  const end = electionWindow.end;
+  const isVotingOpen = Boolean(start && end && currentTime >= start && currentTime <= end);
 
   const handleLogout = () => {
     localStorage.removeItem("adminSession");
@@ -67,7 +78,6 @@ export default function AdminNavbar() {
             <h1 className="font-[900] text-lg tracking-tighter text-gray-900 italic">
               CET<span className="text-[#f05a28]">ADMIN</span>
             </h1>
-            <span className="text-[7px] font-bold text-gray-400 uppercase tracking-[0.22em]">Control Panel</span>
           </div>
         </Link>
 
@@ -95,12 +105,17 @@ export default function AdminNavbar() {
 
         {/* Right Side */}
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 rounded-full border border-gray-100 bg-gray-50 px-3 py-1.5">
-            <span className={`h-2 w-2 rounded-full ${isVotingActive ? "bg-green-500" : "bg-gray-400"}`} />
-            <span className={`text-[10px] font-black uppercase tracking-wide ${isVotingActive ? "text-green-700" : "text-gray-500"}`}>
-              {isVotingActive ? "Voting Open" : "Voting Closed"}
-            </span>
-          </div>
+          <motion.div 
+            whileHover={{ scale: 1.05 }}
+            className={`hidden sm:flex items-center gap-2 rounded-2xl px-4 py-2.5 font-black uppercase tracking-wider text-xs transition-all ${
+              isVotingOpen 
+                ? "bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 text-green-700 shadow-lg shadow-green-500/20" 
+                : "bg-gray-100 border border-gray-200 text-gray-600"
+            }`}
+          >
+            <span className={`h-2.5 w-2.5 rounded-full ${isVotingOpen ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+            {isVotingOpen ? "Voting Open" : "Voting Closed"}
+          </motion.div>
 
           <div className="hidden sm:flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1.5">
             <span className="text-xs font-bold text-gray-600">
@@ -111,18 +126,20 @@ export default function AdminNavbar() {
           {/* Mobile Menu Button */}
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="rounded-lg p-2 transition-colors hover:bg-orange-50 md:hidden"
+            className="rounded-lg p-2 text-black transition-colors hover:bg-orange-50 md:hidden"
           >
             {isOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
 
-          <button
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
             onClick={handleLogout}
-            className="rounded-xl p-2.5 text-gray-600 transition-all hover:bg-red-50 hover:text-red-600"
+            className="rounded-2xl p-2.5 text-black transition-all hover:bg-red-50 hover:text-red-600 hover:shadow-lg hover:shadow-red-500/20"
             title="Sign Out"
           >
             <LogOut size={20} />
-          </button>
+          </motion.button>
         </div>
       </div>
 

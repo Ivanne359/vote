@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CalendarClock, Pause, Play, RotateCcw, Save, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CalendarClock, RotateCcw, Save, ShieldAlert } from "lucide-react";
 import {
+  parseElectionDateTime,
   resetElectionVotes,
   pushSystemNotification,
+  resolveElectionWindow,
   saveElectionSettings,
-  setVotingActive,
   subscribeElectionSettings,
   type ElectionSettings,
 } from "@/lib/adminRealtime";
@@ -25,6 +26,7 @@ export default function AdminElectionPage() {
   const [form, setForm] = useState<ElectionSettings>(defaultSettings);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>("");
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const unsub = subscribeElectionSettings((data) => {
@@ -34,13 +36,45 @@ export default function AdminElectionPage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const toInputDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   const electionWindow = useMemo(() => {
-    return `${form.startDate} ${form.startTime} - ${form.endDate} ${form.endTime}`;
+    const window = resolveElectionWindow(form.startDate, form.startTime, form.endDate, form.endTime);
+    if (!window.start || !window.end) {
+      return `${form.startDate} ${form.startTime} - ${form.endDate} ${form.endTime}`;
+    }
+
+    return `${toInputDate(window.start)} ${form.startTime} - ${toInputDate(window.end)} ${form.endTime}`;
   }, [form]);
 
+  const windowFromSettings = useMemo(
+    () => resolveElectionWindow(settings.startDate, settings.startTime, settings.endDate, settings.endTime),
+    [settings.endDate, settings.endTime, settings.startDate, settings.startTime],
+  );
+
+  const scheduleStart = windowFromSettings.start;
+  const scheduleEnd = windowFromSettings.end;
+
+  const votingState = useMemo(() => {
+    if (!scheduleStart || !scheduleEnd || scheduleEnd <= scheduleStart) return "INVALID";
+    if (currentTime < scheduleStart) return "SCHEDULED";
+    if (currentTime <= scheduleEnd) return "OPEN";
+    return "CLOSED";
+  }, [currentTime, scheduleEnd, scheduleStart]);
+
   const formatElectionTime = (date: string, time: string) => {
-    const parsed = new Date(`${date}T${time}`);
-    if (Number.isNaN(parsed.getTime())) return `${date} ${time}`;
+    const parsed = parseElectionDateTime(date, time);
+    if (!parsed) return `${date} ${time}`;
     return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
 
@@ -48,41 +82,32 @@ export default function AdminElectionPage() {
     setBusy(true);
     setMessage("");
     try {
+      const normalizedWindow = resolveElectionWindow(form.startDate, form.startTime, form.endDate, form.endTime);
+      if (!normalizedWindow.start || !normalizedWindow.end) {
+        setMessage("Invalid schedule. Please provide valid date and time.");
+        setBusy(false);
+        return;
+      }
+
+      const normalizedEndDate = toInputDate(normalizedWindow.end);
+      if (normalizedEndDate !== form.endDate) {
+        setForm((prev) => ({ ...prev, endDate: normalizedEndDate }));
+      }
+
       await saveElectionSettings({
         startDate: form.startDate,
-        endDate: form.endDate,
+        endDate: normalizedEndDate,
         startTime: form.startTime,
         endTime: form.endTime,
       });
       await pushSystemNotification({
         title: "Election schedule updated",
-        description: `Ends at ${formatElectionTime(form.endDate, form.endTime)}`,
+        description: `${formatElectionTime(form.startDate, form.startTime)} → ${formatElectionTime(normalizedEndDate, form.endTime)}`,
         kind: "election",
       });
       setMessage("Election schedule saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save schedule.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onToggleVoting = async () => {
-    setBusy(true);
-    setMessage("");
-    try {
-      const nextActive = !settings.isActive;
-      await setVotingActive(nextActive);
-      await pushSystemNotification({
-        title: nextActive ? "Voting is now OPEN" : "Voting is now CLOSED",
-        description: nextActive
-          ? `Voting ends at ${formatElectionTime(form.endDate, form.endTime)}`
-          : `Voting closed at ${formatElectionTime(form.endDate, form.endTime)}`,
-        kind: "election",
-      });
-      setMessage(nextActive ? "Voting opened successfully." : "Voting closed successfully.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to update voting status.");
     } finally {
       setBusy(false);
     }
@@ -113,9 +138,9 @@ export default function AdminElectionPage() {
         className="rounded-[2rem] border border-orange-100 bg-gradient-to-br from-[#fff7f2] via-white to-[#fff2e9] p-8"
       >
         <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Election Control</p>
-        <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic">Live Election Command</h1>
+        <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic md:text-5xl">Live Election Command</h1>
         <p className="mt-3 max-w-2xl text-sm font-medium text-gray-600">
-          Control the election window, open or close voting instantly, and reset ballots for testing.
+          Set start and end schedule only. Voting opens and closes automatically based on these times.
         </p>
       </motion.section>
 
@@ -188,22 +213,16 @@ export default function AdminElectionPage() {
           className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
         >
           <h2 className="text-2xl font-[900] text-gray-900">Voting State</h2>
-          <div className={`mt-5 rounded-2xl border px-4 py-4 ${settings.isActive ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}>
+          <div className={`mt-5 rounded-2xl border px-4 py-4 ${votingState === "OPEN" ? "border-green-200 bg-green-50" : votingState === "SCHEDULED" ? "border-amber-200 bg-amber-50" : "border-gray-200 bg-gray-50"}`}>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Current</p>
-            <p className={`mt-2 text-2xl font-black ${settings.isActive ? "text-green-600" : "text-gray-700"}`}>
-              {settings.isActive ? "OPEN" : "CLOSED"}
+            <p className={`mt-2 text-2xl font-black ${votingState === "OPEN" ? "text-green-600" : votingState === "SCHEDULED" ? "text-amber-700" : "text-gray-700"}`}>
+              {votingState}
             </p>
             <p className="mt-1 text-xs font-semibold text-gray-500">Last reset: {settings.lastReset ? new Date(settings.lastReset).toLocaleString() : "Never"}</p>
           </div>
-
-          <button
-            disabled={busy}
-            onClick={onToggleVoting}
-            className={`mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black text-white transition disabled:opacity-60 ${settings.isActive ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
-          >
-            {settings.isActive ? <Pause size={16} /> : <Play size={16} />}
-            {settings.isActive ? "Close Voting" : "Open Voting"}
-          </button>
+          <p className="mt-5 text-xs font-semibold text-gray-500">
+            Manual open/close is disabled. This status now follows the configured schedule automatically.
+          </p>
         </motion.article>
       </section>
 

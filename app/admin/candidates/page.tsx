@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { Edit3, ImagePlus, Plus, Trash2, X, AlertCircle, CheckCircle2, User } from "lucide-react";
+import { storage } from "@/lib/firebase";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
   ELECTION_POSITIONS,
   subscribeCandidates,
@@ -42,12 +44,6 @@ const emptyForm: CandidateForm = {
   photoUrl: "",
 };
 
-const LOCAL_PHOTO_SAFE_BYTES = 900000;
-
-const getStringBytes = (value: string): number => {
-  return new Blob([value]).size;
-};
-
 const fileToDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -63,60 +59,13 @@ const fileToDataUrl = (file: File): Promise<string> => {
   });
 };
 
-const loadImage = (src: string): Promise<HTMLImageElement> => {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Unable to process image."));
-    img.src = src;
-  });
-};
-
-const compressImageForLocalStorage = async (file: File): Promise<string> => {
-  const originalDataUrl = await fileToDataUrl(file);
-  if (getStringBytes(originalDataUrl) <= LOCAL_PHOTO_SAFE_BYTES) {
-    return originalDataUrl;
-  }
-
-  const img = await loadImage(originalDataUrl);
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    throw new Error("Canvas is not available in this browser.");
-  }
-
-  let maxDimension = 1200;
-  const qualitySteps = [0.82, 0.72, 0.62, 0.52, 0.45, 0.38, 0.32];
-
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const ratio = Math.min(1, maxDimension / Math.max(img.width, img.height));
-    const width = Math.max(1, Math.floor(img.width * ratio));
-    const height = Math.max(1, Math.floor(img.height * ratio));
-
-    canvas.width = width;
-    canvas.height = height;
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(img, 0, 0, width, height);
-
-    for (const quality of qualitySteps) {
-      const compressed = canvas.toDataURL("image/jpeg", quality);
-      if (getStringBytes(compressed) <= LOCAL_PHOTO_SAFE_BYTES) {
-        return compressed;
-      }
-    }
-
-    maxDimension = Math.floor(maxDimension * 0.8);
-  }
-
-  throw new Error("Image is too large. Please upload a smaller photo.");
-};
 
 export default function AdminCandidatesPage() {
   const [candidates, setCandidates] = useState<CandidateRecord[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CandidateRecord | null>(null);
   const [form, setForm] = useState<CandidateForm>(emptyForm);
+  const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string>("");
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -146,16 +95,13 @@ export default function AdminCandidatesPage() {
   const openAdd = () => {
     setEditing(null);
     setForm(emptyForm);
+    setSelectedPhotoFile(null);
     setModalOpen(true);
   };
 
   const openEdit = (candidate: CandidateRecord) => {
     setEditing(candidate);
-
-    const photoUrlFromCandidate = candidate.photoUrl ?? "";
-    const storedPhoto = typeof window !== "undefined"
-      ? localStorage.getItem(`candidate_${candidate.id}_photo`)
-      : null;
+    setSelectedPhotoFile(null);
 
     setForm({
       name: candidate.name,
@@ -169,7 +115,7 @@ export default function AdminCandidatesPage() {
       experience: candidate.experience ?? "",
       goals: candidate.goals ?? "",
       socialLinks: candidate.socialLinks ?? "",
-      photoUrl: photoUrlFromCandidate || storedPhoto || "",
+      photoUrl: candidate.photoUrl ?? "",
     });
     setModalOpen(true);
   };
@@ -184,12 +130,9 @@ export default function AdminCandidatesPage() {
     if (!file) return;
 
     try {
-      const optimizedPhoto = await compressImageForLocalStorage(file);
-      const photoKey = `candidate_${editing?.id || "temp"}_photo`;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(photoKey, optimizedPhoto);
-      }
-      setForm((prev) => ({ ...prev, photoUrl: optimizedPhoto }));
+      const previewUrl = await fileToDataUrl(file);
+      setSelectedPhotoFile(file);
+      setForm((prev) => ({ ...prev, photoUrl: previewUrl }));
       setFeedback("");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Unable to process image");
@@ -223,41 +166,56 @@ export default function AdminCandidatesPage() {
     setFeedback("");
 
     try {
-      const candidateId = editing?.id;
-      const safePhotoUrl = form.photoUrl.trim();
+      const candidatePayload = {
+        name: form.name.trim(),
+        position: form.position,
+        section: form.section.trim(),
+        partylist: form.partylist.trim(),
+        motto: form.motto.trim(),
+        platform: form.platform.trim(),
+        biography: form.biography.trim(),
+        achievements: form.achievements.trim(),
+        experience: form.experience.trim(),
+        goals: form.goals.trim(),
+        socialLinks: form.socialLinks.trim(),
+      };
 
-      if (safePhotoUrl && getStringBytes(safePhotoUrl) > LOCAL_PHOTO_SAFE_BYTES) {
-        setFeedback("Photo is too large. Please re-upload a smaller image.");
-        setBusy(false);
-        return;
+      let candidateId = editing?.id;
+      let finalPhotoUrl = editing ? form.photoUrl.trim() : "";
+
+      if (selectedPhotoFile) {
+        const storageService = storage;
+        if (!storageService) {
+          throw new Error("Firebase Storage is not configured.");
+        }
+
+        if (!candidateId) {
+          candidateId = await upsertCandidate(
+            {
+              ...candidatePayload,
+              photoUrl: "",
+            },
+          );
+        }
+
+        const safeFileName = selectedPhotoFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const storageRef = ref(storageService, `candidate-photos/${candidateId}/${Date.now()}-${safeFileName}`);
+        await uploadBytes(storageRef, selectedPhotoFile, {
+          contentType: selectedPhotoFile.type || "image/jpeg",
+        });
+        finalPhotoUrl = await getDownloadURL(storageRef);
       }
-      
-      const savedCandidateId = await upsertCandidate(
+
+      await upsertCandidate(
         {
-          name: form.name.trim(),
-          position: form.position,
-          section: form.section.trim(),
-          partylist: form.partylist.trim(),
-          motto: form.motto.trim(),
-          platform: form.platform.trim(),
-          biography: form.biography.trim(),
-          achievements: form.achievements.trim(),
-          experience: form.experience.trim(),
-          goals: form.goals.trim(),
-          socialLinks: form.socialLinks.trim(),
-          photoUrl: safePhotoUrl,
+          ...candidatePayload,
+          photoUrl: finalPhotoUrl,
         },
         candidateId,
       );
       
-      if (typeof window !== "undefined") {
-        if (safePhotoUrl) {
-          localStorage.setItem(`candidate_${savedCandidateId}_photo`, safePhotoUrl);
-        }
-        localStorage.removeItem("candidate_temp_photo");
-      }
-      
       setModalOpen(false);
+      setSelectedPhotoFile(null);
       setFeedback("");
       // Show success message briefly
       setFeedback(`Candidate ${editing ? 'updated' : 'added'} successfully`);
@@ -289,7 +247,7 @@ export default function AdminCandidatesPage() {
         <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Candidate Management</p>
-            <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic">Live Candidate Board</h1>
+            <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic md:text-5xl">Candidate Board</h1>
             <p className="mt-3 text-sm font-medium text-gray-600">Add, edit, delete, and assign candidates by position in real time.</p>
           </div>
           <button
@@ -347,30 +305,22 @@ export default function AdminCandidatesPage() {
               className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-sm"
             >
               <div className="relative h-52 w-full bg-gradient-to-br from-orange-50 to-orange-100 overflow-hidden flex items-center justify-center group">
-                {(() => {
-                  const storedPhoto = typeof window !== 'undefined' ? localStorage.getItem(`candidate_${candidate.id}_photo`) : null;
-                  const photoSrc = storedPhoto;
-                  
-                  if (photoSrc) {
-                    return (
-                      <motion.div
-                        whileHover={{ scale: 1.08 }}
-                        className="relative w-full h-full"
-                      >
-                        <Image src={photoSrc} alt={candidate.name} fill className='object-contain group-hover:brightness-110 transition-all duration-300 p-2' />
-                      </motion.div>
-                    );
-                  }
-                  return (
-                    <motion.div 
-                      animate={{ y: [0, -3, 0] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                      className='text-orange-200'
-                    >
-                      <User size={72} />
-                    </motion.div>
-                  );
-                })()}
+                {candidate.photoUrl ? (
+                  <motion.div
+                    whileHover={{ scale: 1.08 }}
+                    className="relative w-full h-full"
+                  >
+                    <Image src={candidate.photoUrl} alt={candidate.name} fill className='object-contain group-hover:brightness-110 transition-all duration-300 p-2' />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    animate={{ y: [0, -3, 0] }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    className='text-orange-200'
+                  >
+                    <User size={72} />
+                  </motion.div>
+                )}
               </div>
 
               <div className="space-y-4 p-5">
@@ -440,7 +390,7 @@ export default function AdminCandidatesPage() {
             >
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white px-7 py-5">
                 <h2 className="text-2xl font-black text-gray-900">{editing ? "Edit Candidate" : "Add Candidate"}</h2>
-                <button onClick={closeModal} className="rounded-full p-2 transition hover:bg-gray-100">
+                <button onClick={closeModal} className="rounded-full p-2 text-black transition hover:bg-gray-100">
                   <X size={20} />
                 </button>
               </div>

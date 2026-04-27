@@ -5,7 +5,7 @@ import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
-import { subscribeElectionSettings, type ElectionSettings } from "@/lib/adminRealtime";
+import { resolveElectionWindow, subscribeElectionSettings, type ElectionSettings } from "@/lib/adminRealtime";
 import {
   Megaphone,
   CalendarDays,
@@ -119,6 +119,11 @@ export default function HomePage() {
   });
 
   const openPrivacyModal = () => {
+    if (!isVotingOpen) {
+      alert("Voting is currently closed. Please wait until the election opens.");
+      return;
+    }
+
     setShowPrivacyModal(true);
     setHasReadPrivacy(false);
     setPrivacyAgreed(false);
@@ -165,24 +170,35 @@ export default function HomePage() {
     return () => unsub();
   }, []);
 
-  const parseElectionDate = (date?: string, time?: string) => {
-    if (!date || !time) return null;
-    const parsed = new Date(`${date}T${time}`);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  };
-
   const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const formatDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-  const electionEndDate = electionSettings ? parseElectionDate(electionSettings.endDate, electionSettings.endTime) : null;
-  const electionStartDate = electionSettings ? parseElectionDate(electionSettings.startDate, electionSettings.startTime) : null;
-  const electionStatusLabel = electionSettings?.isActive ? 'Voting closes at' : 'Next voting window ends at';
-  const electionRemaining = electionEndDate ? Math.max(0, electionEndDate.getTime() - currentTime.getTime()) : null;
+  const electionWindow = electionSettings
+    ? resolveElectionWindow(
+        electionSettings.startDate,
+        electionSettings.startTime,
+        electionSettings.endDate,
+        electionSettings.endTime,
+      )
+    : { start: null, end: null, isOvernight: false };
+  const electionStartDate = electionWindow.start;
+  const electionEndDate = electionWindow.end;
+  const isBeforeStart = Boolean(electionStartDate && currentTime < electionStartDate);
+  const isAfterEnd = Boolean(electionEndDate && currentTime > electionEndDate);
+  const isVotingOpen = Boolean(
+    electionStartDate &&
+      electionEndDate &&
+      currentTime >= electionStartDate &&
+      currentTime <= electionEndDate,
+  );
+  const electionStatusLabel = isBeforeStart ? 'Voting opens at' : 'Voting closes at';
+  const countdownTarget = isBeforeStart ? electionStartDate : electionEndDate;
+  const electionRemaining = countdownTarget ? Math.max(0, countdownTarget.getTime() - currentTime.getTime()) : null;
   const electionCountdown = electionRemaining !== null
-    ? electionRemaining <= 0
+    ? isAfterEnd
       ? 'Voting has closed'
       : electionRemaining <= 60 * 60 * 1000
-        ? `${Math.max(1, Math.ceil(electionRemaining / (1000 * 60)))} min to close`
+        ? `${Math.max(1, Math.ceil(electionRemaining / (1000 * 60)))} min to ${isBeforeStart ? 'open' : 'close'}`
         : electionRemaining <= 24 * 60 * 60 * 1000
           ? `${Math.ceil(electionRemaining / (1000 * 60 * 60))} hours remaining`
           : `${Math.ceil(electionRemaining / (1000 * 60 * 60 * 24))} days remaining`
@@ -241,7 +257,8 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={openPrivacyModal}
-                className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-[#f05a28] text-white font-black uppercase tracking-tight shadow-2xl shadow-[#f05a28]/20 hover:scale-[1.02] transition-all"
+                disabled={!isVotingOpen}
+                className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-[#f05a28] text-white font-black uppercase tracking-tight shadow-2xl shadow-[#f05a28]/20 hover:scale-[1.02] transition-all disabled:cursor-not-allowed disabled:bg-gray-400 disabled:shadow-none"
               >
                 View Candidates <ArrowRight size={18} />
               </button>
@@ -294,7 +311,8 @@ export default function HomePage() {
             <button
               type="button"
               onClick={openPrivacyModal}
-              className="px-6 py-3 rounded-2xl bg-gray-50 text-gray-900 text-xs font-black uppercase tracking-tight hover:bg-gray-100 transition-all flex items-center gap-2"
+              disabled={!isVotingOpen}
+              className="px-6 py-3 rounded-2xl bg-gray-50 text-gray-900 text-xs font-black uppercase tracking-tight hover:bg-gray-100 transition-all flex items-center gap-2 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500"
             >
               Candidate Page <ChevronRight size={16} />
             </button>
@@ -306,7 +324,7 @@ export default function HomePage() {
       <section id="announcements-section" className="max-w-6xl mx-auto pt-20 px-6">
         {electionEndDate ? (
           <motion.div
-            key={electionSettings?.isActive ? 'voting-open' : 'voting-closed'}
+            key={isVotingOpen ? 'voting-open' : isBeforeStart ? 'voting-upcoming' : 'voting-closed'}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
@@ -315,10 +333,10 @@ export default function HomePage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Election Countdown</p>
-                {electionSettings?.isActive ? (
+                {!isAfterEnd ? (
                   <>
                     <h3 className="mt-3 text-3xl font-[900] tracking-tight text-gray-900">
-                      {electionStatusLabel} {formatTime(electionEndDate)}
+                      {electionStatusLabel} {formatTime(isBeforeStart ? electionStartDate! : electionEndDate)}
                     </h3>
                     <p className="mt-2 text-sm font-semibold text-gray-600">{electionCountdown}</p>
                   </>

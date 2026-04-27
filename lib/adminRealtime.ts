@@ -94,6 +94,34 @@ export interface LiveAnalytics {
   recentVotes: VoteRecord[];
 }
 
+export const parseElectionDateTime = (date?: string, time?: string): Date | null => {
+  if (!date || !time) return null;
+  const parsed = new Date(`${date}T${time}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+export const resolveElectionWindow = (
+  startDate?: string,
+  startTime?: string,
+  endDate?: string,
+  endTime?: string,
+): { start: Date | null; end: Date | null; isOvernight: boolean } => {
+  const start = parseElectionDateTime(startDate, startTime);
+  const rawEnd = parseElectionDateTime(endDate, endTime);
+
+  if (!start || !rawEnd) {
+    return { start, end: rawEnd, isOvernight: false };
+  }
+
+  if (rawEnd > start) {
+    return { start, end: rawEnd, isOvernight: false };
+  }
+
+  const overnightEnd = new Date(rawEnd);
+  overnightEnd.setDate(overnightEnd.getDate() + 1);
+  return { start, end: overnightEnd, isOvernight: true };
+};
+
 const defaultElectionSettings = (): ElectionSettings => {
   const start = new Date();
   const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);

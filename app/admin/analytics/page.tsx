@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Activity, BarChart3, Download, FileSpreadsheet, Gauge, Users, Vote } from "lucide-react";
 import {
   ELECTION_POSITIONS,
+  resolveElectionWindow,
   subscribeCandidates,
   subscribeElectionSettings,
   subscribeLiveAnalytics,
@@ -65,14 +66,14 @@ export default function AdminAnalyticsPage() {
   }, []);
 
   const endDateTime = useMemo(() => {
-    const parsed = new Date(`${election.endDate}T${election.endTime}`);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }, [election.endDate, election.endTime]);
+    const window = resolveElectionWindow(election.startDate, election.startTime, election.endDate, election.endTime);
+    return window.end;
+  }, [election.endDate, election.endTime, election.startDate, election.startTime]);
 
   const hasElectionEnded = useMemo(() => {
-    if (!endDateTime) return !election.isActive;
-    return !election.isActive || nowTick >= endDateTime.getTime();
-  }, [election.isActive, endDateTime, nowTick]);
+    if (!endDateTime) return false;
+    return nowTick >= endDateTime.getTime();
+  }, [endDateTime, nowTick]);
 
   const handleDownloadReport = () => {
     if (!hasElectionEnded) {
@@ -133,8 +134,8 @@ export default function AdminAnalyticsPage() {
       >
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Live Analytics</p>
-            <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic">Realtime Election Insights</h1>
+            <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#f05a28]">Analytics</p>
+            <h1 className="mt-2 text-4xl font-[900] tracking-tight text-gray-900 italic md:text-5xl">Results Dashboard</h1>
             <p className="mt-3 text-sm font-medium text-gray-600">Metrics update automatically as new users register and votes are submitted.</p>
           </div>
 

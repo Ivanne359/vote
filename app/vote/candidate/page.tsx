@@ -7,6 +7,7 @@ import Image from "next/image";
 import Navbar from "../../components/Navbar";
 import CandidateCard from "../../components/CandidateCard";
 import { auth, db } from "@/lib/firebase";
+import { resolveElectionWindow, subscribeElectionSettings, type ElectionSettings, type CandidateRecord } from "@/lib/adminRealtime";
 import {
 	Send,
 	CheckCircle,
@@ -26,7 +27,6 @@ import {
 } from "lucide-react";
 import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import { type CandidateRecord } from "@/lib/adminRealtime";
 
 const POSITIONS = [
 	"Moderator",
@@ -51,14 +51,25 @@ const STEP_STORAGE_KEY = "cetvote_step";
 const SECTION_STORAGE_KEY = "cetvote_section";
 const HIDE_NAME_STORAGE_KEY = "cetvote_hide_name";
 
+const defaultElection: ElectionSettings = {
+	startDate: new Date().toISOString().split("T")[0],
+	endDate: new Date().toISOString().split("T")[0],
+	startTime: "09:00",
+	endTime: "17:00",
+	isActive: false,
+};
+
 export default function CandidatesPage() {
 	const [hasVoted, setHasVoted] = useState(false);
 	const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string>>({});
+	const [submittedVotes, setSubmittedVotes] = useState<Record<string, string>>({});
 	const [isConfirming, setIsConfirming] = useState(false);
 	const [showSummary, setShowSummary] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [isLoadingIdentity, setIsLoadingIdentity] = useState(true);
 	const [liveCandidates, setLiveCandidates] = useState<CandidateRecord[]>([]);
+	const [electionSettings, setElectionSettings] = useState<ElectionSettings>(defaultElection);
+	const [currentTime, setCurrentTime] = useState(new Date());
 	const [activeCandidateModal, setActiveCandidateModal] = useState<{
 		position: string;
 		candidate: CandidateRecord;
@@ -77,6 +88,32 @@ export default function CandidatesPage() {
 		idNumber: "",
 		section: "",
 	});
+
+	useEffect(() => {
+		const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
+		return () => window.clearInterval(timer);
+	}, []);
+
+	useEffect(() => {
+		const unsubElection = subscribeElectionSettings(setElectionSettings);
+		return () => unsubElection();
+	}, []);
+
+	const electionWindow = resolveElectionWindow(
+		electionSettings.startDate,
+		electionSettings.startTime,
+		electionSettings.endDate,
+		electionSettings.endTime,
+	);
+
+	const electionStart = electionWindow.start;
+	const electionEnd = electionWindow.end;
+	const isVotingOpen = Boolean(
+		electionStart &&
+			electionEnd &&
+			currentTime >= electionStart &&
+			currentTime <= electionEnd,
+	);
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
@@ -261,6 +298,7 @@ export default function CandidatesPage() {
 				localStorage.removeItem(STEP_STORAGE_KEY);
 			}
 
+			setSubmittedVotes(selectedCandidates);
 			setHasVoted(true);
 		} catch {
 			alert("Unable to submit vote. Please try again.");
@@ -324,19 +362,35 @@ export default function CandidatesPage() {
 		setActiveCandidateModal(null);
 	}, [activeCandidateModal, handleLiveCandidateSelect]);
 
+	if (!isVotingOpen) {
+		return (
+			<div className="min-h-screen bg-[#FDFCFB] font-poppins pb-28 selection:bg-[#f05a28]/20">
+				<Navbar />
+				<div className="mx-auto flex min-h-[70vh] w-full max-w-3xl items-center justify-center px-6">
+					<div className="w-full rounded-[2rem] border border-orange-100 bg-white p-8 text-center shadow-sm">
+						<p className="text-[11px] font-black uppercase tracking-[0.24em] text-[#f05a28]">Voting Access</p>
+						<h1 className="mt-3 text-3xl font-[900] tracking-tight text-gray-900">Voting is currently closed</h1>
+						<p className="mt-3 text-sm font-semibold text-gray-600">
+							Please wait until the election is opened by admin before proceeding to the candidate ballot.
+						</p>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	if (hasVoted) {
 		return (
 			<AnimatePresence>
 				<motion.div
 					initial={{ opacity: 0 }}
 					animate={{ opacity: 1 }}
-					className="min-h-screen bg-white flex items-center justify-center p-6 overflow-hidden relative"
+					className="min-h-screen bg-gradient-to-br from-white via-orange-50/30 to-white flex items-center justify-center p-6 overflow-hidden relative"
 				>
-					<div className="absolute inset-0 bg-orange-50/30 -z-10" />
 					<motion.div
 						initial={{ scale: 0.8, y: 20 }}
 						animate={{ scale: 1, y: 0 }}
-						className="bg-white p-12 rounded-[3.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] max-w-lg text-center border border-orange-100 relative overflow-hidden"
+						className="bg-white p-8 md:p-12 rounded-[3.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] max-w-2xl w-full border border-orange-100 relative overflow-hidden max-h-[90vh] overflow-y-auto"
 					>
 						<div className="absolute top-0 left-0 w-full h-2 bg-green-500" />
 						<motion.div
@@ -348,9 +402,11 @@ export default function CandidatesPage() {
 							<CheckCircle size={56} strokeWidth={2.5} />
 						</motion.div>
 
-						<h2 className="text-4xl font-black text-gray-900 mb-4 tracking-tight uppercase italic">
-							Receipt Issued
+						<h2 className="text-4xl font-black text-gray-900 mb-2 tracking-tight uppercase italic text-center">
+							Ballot Confirmed
 						</h2>
+
+						<p className="text-center text-gray-500 mb-8 font-semibold">Your vote has been securely recorded</p>
 
 						<div className="bg-gray-50 rounded-2xl p-4 mb-8 flex flex-col gap-2">
 							<p className="text-xs font-mono text-gray-400">TRANSACTION HASH</p>
@@ -359,9 +415,33 @@ export default function CandidatesPage() {
 							</p>
 						</div>
 
-						<p className="text-lg text-gray-500 mb-8 leading-relaxed">
-							Your identity has been verified and your choices recorded. Digital democracy in action.
-						</p>
+						<div className="mb-8">
+							<h3 className="text-lg font-black text-gray-900 mb-4 uppercase tracking-tight">Your Ballot Summary</h3>
+							<div className="space-y-3">
+								{POSITIONS.map((position) => {
+									const voteId = submittedVotes[position];
+									const selectedCandidate = liveCandidates.find(c => c.id === voteId);
+									const candidateName = voteId === "abstain" 
+										? "ABSTAINED" 
+										: selectedCandidate?.name || "SELECTION RECORDED";
+
+									return (
+										<motion.div
+											key={position}
+											initial={{ opacity: 0, x: -10 }}
+											animate={{ opacity: 1, x: 0 }}
+											className="p-4 rounded-2xl border border-green-100 bg-green-50/50 flex items-start justify-between gap-4"
+										>
+											<div className="flex-1 min-w-0">
+												<p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{position}</p>
+												<p className="text-sm font-black text-gray-900 truncate">{candidateName}</p>
+											</div>
+											<CheckCircle size={20} className="text-green-500 flex-shrink-0 mt-1" />
+										</motion.div>
+									);
+								})}
+							</div>
+						</div>
 
 						<Link
 							href="/vote"
@@ -725,9 +805,7 @@ export default function CandidatesPage() {
 											className="relative h-72 w-full overflow-hidden rounded-xl bg-white flex items-center justify-center"
 										>
 											{(() => {
-												const stored = typeof window !== 'undefined' ? localStorage.getItem(`candidate_${activeCandidateModal?.candidate.id}_photo`) : null;
-												const tempStored = typeof window !== 'undefined' ? localStorage.getItem(`candidate_temp_photo`) : null;
-												const photoSrc = stored || tempStored || activeCandidateModal?.candidate.photoUrl;
+												const photoSrc = activeCandidateModal?.candidate.photoUrl;
 												return photoSrc ? (
 													<motion.div
 														whileHover={{ scale: 1.04 }}
@@ -867,27 +945,37 @@ export default function CandidatesPage() {
 							</div>
 
 							<div className="space-y-4">
-								{POSITIONS.map((pos) => (
-									<div
-										key={pos}
-										className="p-4 rounded-2xl border border-gray-100 flex justify-between items-center group hover:border-[#f05a28]/30 transition-all"
-									>
-										<span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-											{pos}
-										</span>
-										<span
-											className={`text-xs font-black ${
-												selectedCandidates[pos] ? "text-gray-900" : "text-red-400"
+								{POSITIONS.map((pos) => {
+									const voteId = selectedCandidates[pos];
+									const selectedCandidate = liveCandidates.find(c => c.id === voteId);
+									const displayName = voteId === "abstain" 
+										? "ABSTAINED" 
+										: selectedCandidate?.name || (voteId ? "SELECTION RECORDED" : "PENDING");
+
+									return (
+										<motion.div
+											key={pos}
+											initial={{ opacity: 0, x: -10 }}
+											animate={{ opacity: 1, x: 0 }}
+											className={`p-4 rounded-2xl border-2 transition-all ${
+												voteId 
+													? "border-green-100 bg-green-50/50" 
+													: "border-red-100 bg-red-50/30"
 											}`}
 										>
-											{selectedCandidates[pos] === "abstain"
-												? "ABSTAINED"
-												: selectedCandidates[pos]
-												? "SELECTION MADE"
-												: "PENDING"}
-										</span>
-									</div>
-								))}
+											<p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+												{pos}
+											</p>
+											<p className={`text-sm font-black uppercase tracking-tight truncate ${
+												voteId 
+													? "text-gray-900" 
+													: "text-red-400"
+											}`}>
+												{displayName}
+											</p>
+										</motion.div>
+									);
+								})}
 							</div>
 						</motion.div>
 					</>

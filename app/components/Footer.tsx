@@ -88,7 +88,7 @@ export default function Footer() {
               {[
                 { icon: <Facebook size={20} />, href: "#" },
                 { icon: <Instagram size={20} />, href: "#" },
-                { icon: <Github size={20} />, href: "#" },
+                { icon: <Github size={20} />, href: "https://github.com/Ivanne359" },
                 { icon: <Linkedin size={20} />, href: "#" }
               ].map((social, idx) => (
                 <a 

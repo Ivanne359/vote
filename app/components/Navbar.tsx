@@ -45,6 +45,7 @@ type LiveNotification = {
 const READ_NOTIFICATIONS_KEY = 'cetvote_read_notifications';
 const DISMISSED_NOTIFICATIONS_KEY = 'cetvote_dismissed_notifications';
 const LAST_TOAST_NOTIFICATION_ID = 'cetvote_last_toast_notification_id';
+const DISMISSED_TOAST_NOTIFICATIONS_KEY = 'cetvote_dismissed_toast_notifications';
 
 export default function Navbar() {
   const router = useRouter();
@@ -64,6 +65,7 @@ export default function Navbar() {
   const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>([]);
+  const [dismissedToastIds, setDismissedToastIds] = useState<string[]>([]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -130,11 +132,14 @@ export default function Navbar() {
     try {
       const read = JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_KEY) || '[]');
       const dismissed = JSON.parse(localStorage.getItem(DISMISSED_NOTIFICATIONS_KEY) || '[]');
+      const dismissedToast = JSON.parse(localStorage.getItem(DISMISSED_TOAST_NOTIFICATIONS_KEY) || '[]');
       if (Array.isArray(read)) setReadNotificationIds(read.filter((item) => typeof item === 'string'));
       if (Array.isArray(dismissed)) setDismissedNotificationIds(dismissed.filter((item) => typeof item === 'string'));
+      if (Array.isArray(dismissedToast)) setDismissedToastIds(dismissedToast.filter((item) => typeof item === 'string'));
     } catch {
       setReadNotificationIds([]);
       setDismissedNotificationIds([]);
+      setDismissedToastIds([]);
     }
   }, []);
 
@@ -154,12 +159,9 @@ export default function Navbar() {
       setNotifications(mappedItems);
 
       const latestElection = mappedItems[0];
-      const lastToastId = typeof window !== 'undefined' ? localStorage.getItem(LAST_TOAST_NOTIFICATION_ID) : null;
+      const dismissedToastIds = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem(DISMISSED_TOAST_NOTIFICATIONS_KEY) || '[]') : [];
 
-      if (latestElection && latestElection.id !== lastToastId) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(LAST_TOAST_NOTIFICATION_ID, latestElection.id);
-        }
+      if (latestElection && !dismissedToastIds.includes(latestElection.id)) {
         setToastNotification(latestElection);
       }
     });
@@ -464,7 +466,15 @@ export default function Navbar() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setToastNotification(null)}
+                  onClick={() => {
+                    if (toastNotification && typeof window !== 'undefined') {
+                      const dismissedToastIds = JSON.parse(localStorage.getItem(DISMISSED_TOAST_NOTIFICATIONS_KEY) || '[]');
+                      dismissedToastIds.push(toastNotification.id);
+                      localStorage.setItem(DISMISSED_TOAST_NOTIFICATIONS_KEY, JSON.stringify(dismissedToastIds));
+                      setDismissedToastIds(dismissedToastIds);
+                    }
+                    setToastNotification(null);
+                  }}
                   className="rounded-full p-1.5 text-white/80 hover:bg-white/15 hover:text-white"
                   aria-label="Dismiss alert"
                 >
@@ -529,9 +539,9 @@ export default function Navbar() {
                   >
                     <div className="flex items-center justify-between border-b border-gray-50 bg-gradient-to-r from-gray-50 to-white p-4">
                       <div>
-                        <span className="text-[9px] font-[900] uppercase tracking-[0.2em] text-gray-500">Live Updates</span>
+                        <span className="text-[9px] font-[900] uppercase tracking-[0.2em] text-gray-500">Notifications</span>
                         <p className="mt-1 text-[11px] font-semibold text-gray-400">
-                          {unreadCount > 0 ? `${unreadCount} unread update${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
+                          {unreadCount > 0 ? `${unreadCount} unread update${unreadCount > 1 ? 's' : ''}` : ''}
                         </p>
                       </div>
                       <button onClick={() => setIsNotifOpen(false)} className="rounded-full p-1.5 transition-colors hover:bg-gray-100">
@@ -766,9 +776,9 @@ export default function Navbar() {
             >
               <div className="flex items-center justify-between p-8 pb-0">
                 <h2 className="text-2xl font-[900] italic uppercase tracking-tight">
-                  App <span className="text-[#f05a28]">Settings</span>
+                  <span className="text-black">App</span> <span className="text-[#f05a28]">Settings</span>
                 </h2>
-                <button onClick={() => setShowSettingsModal(false)} className="rounded-full bg-gray-50 p-3 transition-colors hover:bg-gray-100">
+                <button onClick={() => setShowSettingsModal(false)} className="rounded-full bg-gray-50 p-3 text-black transition-colors hover:bg-gray-100">
                   <X size={20} />
                 </button>
               </div>

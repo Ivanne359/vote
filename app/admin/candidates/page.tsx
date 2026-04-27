@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { Edit3, ImagePlus, Plus, Trash2, X, AlertCircle, CheckCircle2, User } from "lucide-react";
-import { storage } from "@/lib/firebase";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
   ELECTION_POSITIONS,
   subscribeCandidates,
@@ -179,46 +177,18 @@ export default function AdminCandidatesPage() {
         experience: form.experience.trim(),
         goals: form.goals.trim(),
         socialLinks: form.socialLinks.trim(),
+        photoUrl: form.photoUrl.trim(), // Save the base64 image directly
       };
 
       let candidateId = editing?.id;
-      let finalPhotoUrl = "";
 
-      // Preserve existing photo URL if not editing or if editing without selecting a new photo
-      if (editing && !selectedPhotoFile) {
-        finalPhotoUrl = editing.photoUrl || "";
+      if (!candidateId) {
+        // Creating new candidate
+        candidateId = await upsertCandidate(candidatePayload);
+      } else {
+        // Updating existing candidate
+        await upsertCandidate(candidatePayload, candidateId);
       }
-
-      if (selectedPhotoFile) {
-        const storageService = storage;
-        if (!storageService) {
-          throw new Error("Firebase Storage is not configured.");
-        }
-
-        if (!candidateId) {
-          candidateId = await upsertCandidate(
-            {
-              ...candidatePayload,
-              photoUrl: "",
-            },
-          );
-        }
-
-        const safeFileName = selectedPhotoFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const storageRef = ref(storageService, `candidate-photos/${candidateId}/${Date.now()}-${safeFileName}`);
-        await uploadBytes(storageRef, selectedPhotoFile, {
-          contentType: selectedPhotoFile.type || "image/jpeg",
-        });
-        finalPhotoUrl = await getDownloadURL(storageRef);
-      }
-
-      await upsertCandidate(
-        {
-          ...candidatePayload,
-          photoUrl: finalPhotoUrl,
-        },
-        candidateId,
-      );
       
       setModalOpen(false);
       setSelectedPhotoFile(null);

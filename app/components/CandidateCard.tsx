@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { CheckCircle2, Sparkles, User } from "lucide-react";
+import { useState } from "react";
 
 interface CandidateCardProps {
   name: string;
@@ -31,7 +32,8 @@ export default function CandidateCard({
   onVoteNow,
   candidateId,
 }: CandidateCardProps) {
-  const photoSrc = image;
+  const [imageError, setImageError] = useState(false);
+  const photoSrc = image && !imageError ? image : null;
 
   return (
     <motion.div
@@ -60,7 +62,15 @@ export default function CandidateCard({
             whileHover={{ scale: 1.06 }}
             className="relative w-full h-full flex items-center justify-center"
           >
-            <Image src={photoSrc} alt={name} fill className="object-cover transition-transform duration-500 group-hover:scale-110" />
+            <Image 
+              src={photoSrc} 
+              alt={name} 
+              fill 
+              className="object-contain transition-transform duration-500 group-hover:scale-110 p-2"
+              onError={() => setImageError(true)}
+              unoptimized
+              priority={false}
+            />
             <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
           </motion.div>
         ) : (

@@ -68,6 +68,7 @@ export default function AdminCandidatesPage() {
   const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string>("");
+  const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, boolean>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -181,7 +182,12 @@ export default function AdminCandidatesPage() {
       };
 
       let candidateId = editing?.id;
-      let finalPhotoUrl = editing ? form.photoUrl.trim() : "";
+      let finalPhotoUrl = "";
+
+      // Preserve existing photo URL if not editing or if editing without selecting a new photo
+      if (editing && !selectedPhotoFile) {
+        finalPhotoUrl = editing.photoUrl || "";
+      }
 
       if (selectedPhotoFile) {
         const storageService = storage;
@@ -216,8 +222,8 @@ export default function AdminCandidatesPage() {
       
       setModalOpen(false);
       setSelectedPhotoFile(null);
-      setFeedback("");
-      // Show success message briefly
+      setForm(emptyForm);
+      setEditing(null);
       setFeedback(`Candidate ${editing ? 'updated' : 'added'} successfully`);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Unable to save candidate");
@@ -305,12 +311,20 @@ export default function AdminCandidatesPage() {
               className="overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-sm"
             >
               <div className="relative h-52 w-full bg-gradient-to-br from-orange-50 to-orange-100 overflow-hidden flex items-center justify-center group">
-                {candidate.photoUrl ? (
+                {candidate.photoUrl && !imageLoadErrors[candidate.id] ? (
                   <motion.div
                     whileHover={{ scale: 1.08 }}
                     className="relative w-full h-full"
                   >
-                    <Image src={candidate.photoUrl} alt={candidate.name} fill className='object-contain group-hover:brightness-110 transition-all duration-300 p-2' />
+                    <Image 
+                      src={candidate.photoUrl} 
+                      alt={candidate.name} 
+                      fill 
+                      className='object-contain group-hover:brightness-110 transition-all duration-300 p-2'
+                      onError={() => setImageLoadErrors((prev) => ({ ...prev, [candidate.id]: true }))}
+                      unoptimized
+                      priority={false}
+                    />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -400,10 +414,19 @@ export default function AdminCandidatesPage() {
                   <p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-gray-500">Photo</p>
                   {form.photoUrl ? (
                     <div className="relative h-44 w-full overflow-hidden rounded-2xl border border-gray-100 bg-white">
-                      <Image src={form.photoUrl} alt="Candidate preview" fill className="object-contain p-2" />
+                      <Image 
+                        src={form.photoUrl} 
+                        alt="Candidate preview" 
+                        fill 
+                        className="object-contain p-2"
+                        unoptimized
+                      />
                       <button
                         type="button"
-                        onClick={() => setForm((prev) => ({ ...prev, photoUrl: "" }))}
+                        onClick={() => {
+                          setForm((prev) => ({ ...prev, photoUrl: "" }));
+                          setSelectedPhotoFile(null);
+                        }}
                         className="absolute right-2 top-2 rounded-full bg-black/70 p-1.5 text-white"
                       >
                         <X size={14} />

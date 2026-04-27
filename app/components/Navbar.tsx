@@ -82,12 +82,13 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (!db || !voterId || voterId === '00000000') return;
+    const firestore = db;
+    if (!firestore || !voterId || voterId === '00000000') return;
 
     const loadUserProfile = async () => {
       try {
         const userQuery = query(
-          collection(db, 'users'),
+          collection(firestore, 'users'),
           where('studentId', '==', voterId),
           limit(1)
         );
@@ -381,10 +382,11 @@ export default function Navbar() {
 
   const resolveUserDocId = async () => {
     if (userDocId) return userDocId;
-    if (!db || !voterId || voterId === '00000000') return null;
+    const firestore = db;
+    if (!firestore || !voterId || voterId === '00000000') return null;
 
     const userQuery = query(
-      collection(db, 'users'),
+      collection(firestore, 'users'),
       where('studentId', '==', voterId),
       limit(1)
     );
@@ -407,19 +409,21 @@ export default function Navbar() {
       localStorage.setItem('voterPic', base64String);
 
       void (async () => {
-        if (!db || !storage) return;
+        const firestore = db;
+        const storageService = storage;
+        if (!firestore || !storageService) return;
 
         try {
           const resolvedDocId = await resolveUserDocId();
           if (!resolvedDocId) return;
 
-          const storageRef = ref(storage, `profile-pictures/${resolvedDocId}/avatar`);
+          const storageRef = ref(storageService, `profile-pictures/${resolvedDocId}/avatar`);
           await uploadBytes(storageRef, file, {
             contentType: file.type || 'image/jpeg',
           });
 
           const downloadURL = await getDownloadURL(storageRef);
-          await updateDoc(doc(db, 'users', resolvedDocId), {
+          await updateDoc(doc(firestore, 'users', resolvedDocId), {
             profilePic: downloadURL,
             profilePicUpdatedAt: new Date().toISOString(),
           });

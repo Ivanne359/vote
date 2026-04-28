@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import { Lock, Mail, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Lock, Mail, AlertCircle, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 const ADMIN_EMAIL = "admin@hcdc.edu.ph";
 const ADMIN_PASSWORD = "123";
@@ -121,9 +121,10 @@ export default function AdminLogin() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-gray-400 hover:text-[#f05a28] hover:bg-[#f05a28]/5 transition-colors"
                 >
-                  {showPassword ? "Hide" : "Show"}
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>
@@ -131,9 +132,9 @@ export default function AdminLogin() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-8 bg-[#f05a28] text-white font-[900] py-3.5 rounded-2xl uppercase tracking-widest text-sm hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-[#f05a28]/30 hover:shadow-[#f05a28]/50"
+              className="w-full mt-8 bg-black text-white font-[900] py-3.5 rounded-2xl uppercase tracking-widest text-sm hover:bg-[#f05a28] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-black/20 hover:shadow-[#f05a28]/50"
             >
-              {loading ? "Signing In..." : "Admin Sign In"}
+              {loading ? "Signing In..." : "Login"}
             </button>
           </form>
 

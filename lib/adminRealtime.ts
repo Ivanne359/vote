@@ -79,7 +79,7 @@ export interface VoteRecord {
   voterId: string;
   voterName: string;
   section: string;
-  selections: Record<string, string>;
+  selections: Record<string, string | string[]>;
   createdAt?: { toDate?: () => Date } | Date | unknown;
 }
 
@@ -391,8 +391,22 @@ export const subscribeLiveAnalytics = (
     votesInRange.forEach((vote) => {
       Object.entries(vote.selections || {}).forEach(([position, choice]) => {
         if (!choice || choice === "abstain") return;
+
+        // Increment position vote count (for both single and multi-select positions)
         votesByPosition[position] = (votesByPosition[position] ?? 0) + 1;
-        candidateVotes[choice] = (candidateVotes[choice] ?? 0) + 1;
+
+        // Handle both single selections (string) and multi-select (array)
+        if (Array.isArray(choice)) {
+          // Multi-select position - count each candidate separately
+          choice.forEach((candidateId) => {
+            if (candidateId) {
+              candidateVotes[candidateId] = (candidateVotes[candidateId] ?? 0) + 1;
+            }
+          });
+        } else {
+          // Single-select position
+          candidateVotes[choice] = (candidateVotes[choice] ?? 0) + 1;
+        }
       });
 
       const key = vote.section || "Unspecified";
@@ -434,7 +448,7 @@ export const subscribeLiveAnalytics = (
         voterId: String(raw.voterId ?? voteDoc.id),
         voterName: String(raw.voterName ?? "Anonymous Voter"),
         section: String(raw.section ?? "Unspecified"),
-        selections: (raw.selections as Record<string, string>) ?? {},
+        selections: (raw.selections as Record<string, string | string[]>) ?? {},
         createdAt: raw.createdAt,
       };
     });

@@ -28,8 +28,7 @@ export default function Footer() {
   };
 
   return (
-    // relative z-10 ug bg-white ensures nga matabonan ang background lines
-    <footer className="relative z-10 w-full bg-white border-t border-gray-100 pt-20 pb-10 px-6 mt-auto">
+    <footer className="relative z-10 mt-auto w-full border-t border-orange-100/70 bg-white/80 px-6 pb-10 pt-16 backdrop-blur-xl">
       
       {/* --- Back to Top Button --- */}
       <AnimatePresence>
@@ -39,7 +38,7 @@ export default function Footer() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             onClick={scrollToTop}
-            className="fixed bottom-10 right-10 z-[110] p-4 bg-white border border-gray-100 text-[#f05a28] rounded-2xl shadow-xl hover:shadow-[#f05a28]/20 hover:ring-4 hover:ring-[#f05a28]/10 transition-all duration-300 group"
+            className="fixed bottom-6 right-6 z-[110] rounded-2xl border border-orange-100 bg-white p-4 text-[#f05a28] shadow-[0_18px_40px_-22px_rgba(15,23,42,0.55)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_50px_-24px_rgba(240,90,40,0.35)] hover:ring-4 hover:ring-[#f05a28]/10 group"
           >
             <ArrowUp size={24} className="group-hover:-translate-y-1 transition-transform duration-300" />
           </motion.button>
@@ -52,14 +51,14 @@ export default function Footer() {
           {/* --- Brand Section (5 cols) --- */}
           <div className="md:col-span-5 space-y-6">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gray-50 rounded-xl">
+              <div className="rounded-2xl border border-orange-100 bg-[#fff7f2] p-2 shadow-sm">
                 <Image src="/cet.png" alt="CET Logo" width={40} height={40} className="object-contain" unoptimized priority />
               </div>
               <h2 className="font-[900] text-2xl tracking-tighter italic text-gray-900">
                 CET<span className="text-[#f05a28]">VOTE</span>
               </h2>
             </div>
-            <p className="text-sm text-gray-500 leading-relaxed max-w-sm font-medium">
+            <p className="max-w-sm text-sm font-medium leading-relaxed text-gray-500">
               The official secure online voting platform for the College of Engineering and Technology Students Organization. Empowering students through digital democracy.
             </p>
           </div>
@@ -111,7 +110,7 @@ export default function Footer() {
             </p>
             
           </div>
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 rounded-full border border-gray-100">
+          <div className="flex items-center gap-2 rounded-full border border-gray-100 bg-gray-50 px-4 py-1.5">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Dev by</span>
             <span className="text-[11px] font-black text-gray-900 uppercase tracking-wider">Group HCI</span>
           </div>

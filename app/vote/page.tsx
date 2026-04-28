@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
-import Link from "next/link";
+import Link from "next/link"
 import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
-import { resolveElectionWindow, subscribeElectionSettings, type ElectionSettings } from "@/lib/adminRealtime";
+import { ELECTION_POSITIONS, resolveElectionWindow, subscribeCandidates, subscribeElectionSettings, type CandidateRecord, type ElectionSettings } from "@/lib/adminRealtime";
 import {
   Megaphone,
   CalendarDays,
@@ -101,6 +101,7 @@ Limited pieces only, so secure yours while supplies last.`,
 export default function HomePage() {
   const router = useRouter();
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [candidates, setCandidates] = useState<CandidateRecord[]>([]);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<
     (typeof ANNOUNCEMENTS)[0] | null
   >(null);
@@ -170,6 +171,13 @@ export default function HomePage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const unsub = subscribeCandidates((data) => {
+      setCandidates(data);
+    });
+    return () => unsub();
+  }, []);
+
   const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const formatDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
@@ -203,6 +211,21 @@ export default function HomePage() {
           ? `${Math.ceil(electionRemaining / (1000 * 60 * 60))} hours remaining`
           : `${Math.ceil(electionRemaining / (1000 * 60 * 60 * 24))} days remaining`
     : null;
+  const candidatePreview = [...candidates].sort((left, right) => {
+    const leftPositionIndex = ELECTION_POSITIONS.indexOf(left.position as (typeof ELECTION_POSITIONS)[number]);
+    const rightPositionIndex = ELECTION_POSITIONS.indexOf(right.position as (typeof ELECTION_POSITIONS)[number]);
+
+    const normalizedLeftIndex = leftPositionIndex === -1 ? Number.MAX_SAFE_INTEGER : leftPositionIndex;
+    const normalizedRightIndex = rightPositionIndex === -1 ? Number.MAX_SAFE_INTEGER : rightPositionIndex;
+
+    if (normalizedLeftIndex !== normalizedRightIndex) {
+      return normalizedLeftIndex - normalizedRightIndex;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+  const getPreviewPositionLabel = (position?: string) =>
+    position === "Business Manager (Select 2)" ? "Business Manager" : (position || "Candidate");
 
   return (
     <main className="min-h-screen bg-[#FDFCFB] font-poppins pb-28 selection:bg-[#f05a28]/20">
@@ -359,6 +382,109 @@ export default function HomePage() {
             </div>
           </motion.div>
         ) : null}
+
+        {/* CANDIDATE PREVIEW */}
+        <section className="pt-12 pb-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-6">
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="h-0.5 w-10 bg-[#f05a28]" />
+                <p className="text-[#f05a28] text-[10px] font-black uppercase tracking-[0.35em]">
+                  Candidate Preview
+                </p>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tighter text-gray-900 italic uppercase">
+                Running for Election
+              </h2>
+              <p className="mt-3 max-w-2xl text-sm md:text-base text-gray-600 leading-relaxed">
+                Take a quick look at the official candidates. Vote wisely and make your voice count.
+              </p>
+            </div>
+          </div>
+
+          {candidatePreview.length > 0 ? (
+            <div className="-mx-6 px-6 overflow-x-auto pb-3 md:overflow-visible">
+              <div className="flex gap-4 md:grid md:grid-cols-2 xl:grid-cols-3 md:gap-5 snap-x snap-mandatory md:snap-none">
+                {candidatePreview.map((candidate) => (
+                  <article
+                    key={candidate.id}
+                    className="group min-w-[270px] max-w-[270px] md:min-w-0 md:max-w-none snap-start overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.45)] transition-transform duration-300 hover:-translate-y-1"
+                  >
+                    <div className="relative h-52 bg-gradient-to-br from-[#fff5ef] via-[#fffdf9] to-[#f8e2cd] flex items-center justify-center overflow-hidden">
+                      {candidate.photoUrl ? (
+                        <img
+                          src={candidate.photoUrl}
+                          alt={candidate.name}
+                          className="h-full w-full object-contain p-3 transition-transform duration-500 group-hover:scale-[1.04]"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-center">
+                          <div>
+                            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-white shadow-sm text-[#f05a28] text-3xl font-black">
+                              {candidate.name
+                                .split(" ")
+                                .filter(Boolean)
+                                .slice(0, 2)
+                                .map((part) => part[0]?.toUpperCase())
+                                .join("") || "C"}
+                            </div>
+                            <p className="mt-3 text-[10px] font-black uppercase tracking-[0.24em] text-gray-400">
+                              No photo uploaded
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#f05a28] shadow-sm backdrop-blur">
+                        {getPreviewPositionLabel(candidate.position)}
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 p-5">
+                      <div>
+                        <h3 className="text-xl font-black uppercase tracking-tight text-gray-950">
+                          {candidate.name}
+                        </h3>
+                        <p className="mt-1 text-sm font-semibold text-[#f05a28]">
+                          {candidate.section || candidate.courseYearDepartment || "Running candidate"}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {candidate.partylist ? (
+                          <span className="rounded-full border border-[#ffd9c6] bg-[#fff4ec] px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#f05a28]">
+                            {candidate.partylist}
+                          </span>
+                        ) : null}
+                        <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-gray-500">
+                          Preview
+                        </span>
+                      </div>
+
+                      {candidate.motto ? (
+                        <p className="line-clamp-3 border-l-2 border-[#ffe5d6] pl-3 text-sm italic leading-relaxed text-gray-600">
+                          “{candidate.motto}”
+                        </p>
+                      ) : (
+                        <p className="border-l-2 border-[#ffe5d6] pl-3 text-sm leading-relaxed text-gray-600">
+                          Open the full candidate page to review the complete ballot list.
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-[2rem] border border-dashed border-gray-200 bg-gray-50 px-6 py-10 text-center">
+              <p className="text-lg font-black text-gray-900">No candidates added yet.</p>
+              <p className="mt-2 text-sm text-gray-600">
+                Once the admin publishes candidates, their cards will appear here automatically.
+              </p>
+            </div>
+          )}
+        </section>
+
         <div className="mb-14">
           <div className="flex items-center gap-3 mb-3">
             <span className="h-0.5 w-10 bg-[#f05a28]" />

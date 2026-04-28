@@ -8,6 +8,7 @@ import { Lock, Mail, AlertCircle, CheckCircle2 } from "lucide-react";
 
 const ADMIN_EMAIL = "admin@hcdc.edu.ph";
 const ADMIN_PASSWORD = "123";
+const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -33,6 +34,7 @@ export default function AdminLogin() {
       localStorage.setItem("adminSession", JSON.stringify({
         email,
         loginTime: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS).toISOString(),
       }));
 
       router.push("/admin/dashboard");
@@ -135,17 +137,6 @@ export default function AdminLogin() {
             </button>
           </form>
 
-          <div className="mt-8 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
-            <p className="text-[10px] font-bold text-blue-700 uppercase tracking-widest mb-2">
-              Demo Credentials:
-            </p>
-            <p className="text-xs text-blue-600 font-medium">
-              Email: <span className="font-[900]">admin@hcdc.edu.ph</span>
-            </p>
-            <p className="text-xs text-blue-600 font-medium">
-              Password: <span className="font-[900]">123</span>
-            </p>
-          </div>
         </div>
       </motion.div>
     </div>

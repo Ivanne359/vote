@@ -1,8 +1,9 @@
 "use client";
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, User, Loader2, ArrowRight, AlertCircle, Mail, IdCard, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { Poppins } from 'next/font/google';
@@ -223,7 +224,7 @@ export default function AuthPage() {
   };
 
   return (
-    <div className={`${poppins.className} relative min-h-screen flex items-center justify-center p-4 sm:p-6 bg-[#FAFAFA] overflow-hidden`}>
+    <div className={`${poppins.className} relative min-h-screen flex flex-col items-center justify-center gap-8 p-4 sm:p-6 bg-[#FAFAFA] overflow-hidden`}>
       <div className="absolute top-0 left-0 w-full h-full -z-0 pointer-events-none">
         <div className="absolute top-[-5%] left-[-5%] w-[60%] h-[40%] bg-[#f05a28]/10 rounded-full blur-[80px]" />
         <div className="absolute bottom-[-5%] right-[-5%] w-[60%] h-[40%] bg-orange-200/20 rounded-full blur-[80px]" />
@@ -400,6 +401,8 @@ export default function AuthPage() {
           </div>
         </div>
       </motion.div>
+
+      
     </div>
   );
 }

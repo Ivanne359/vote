@@ -1,7 +1,7 @@
 "use client";
 
 import Image from 'next/image';
-import { useState, useRef, useEffect, ChangeEvent } from 'react';
+import { useState, useRef, useEffect, ChangeEvent, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User,
@@ -28,9 +28,7 @@ import { collection, query, where, getDocs, limit, doc, updateDoc } from 'fireba
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import {
   subscribeElectionSettings,
-  subscribeSystemNotifications,
   type ElectionSettings,
-  type SystemNotification,
 } from '@/lib/adminRealtime';
 
 type LiveNotification = {
@@ -40,11 +38,11 @@ type LiveNotification = {
   kind: 'election';
   actionHref?: string;
   actionLabel?: string;
+  countdownTarget?: Date;
 };
 
 const READ_NOTIFICATIONS_KEY = 'cetvote_read_notifications';
 const DISMISSED_NOTIFICATIONS_KEY = 'cetvote_dismissed_notifications';
-const LAST_TOAST_NOTIFICATION_ID = 'cetvote_last_toast_notification_id';
 const DISMISSED_TOAST_NOTIFICATIONS_KEY = 'cetvote_dismissed_toast_notifications';
 
 export default function Navbar() {
@@ -60,7 +58,6 @@ export default function Navbar() {
   const [voterEmail, setVoterEmail] = useState('');
   const [profilePic, setProfilePic] = useState<string | null>(null);
   const [userDocId, setUserDocId] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<LiveNotification[]>([]);
   const [localNotifications, setLocalNotifications] = useState<LiveNotification[]>([]);
   const [electionSettings, setElectionSettings] = useState<ElectionSettings | null>(null);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
@@ -69,7 +66,6 @@ export default function Navbar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
-  const previousToastIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     const savedId = localStorage.getItem('voterId');
@@ -144,32 +140,6 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (!db) return;
-
-    const unsubSystemNotifications = subscribeSystemNotifications((items) => {
-      const mappedItems: LiveNotification[] = items
-        .filter((item) => item.kind === 'election')
-        .map((item: SystemNotification): LiveNotification => ({
-          id: item.id,
-          title: item.title,
-          description: item.description,
-          kind: 'election',
-        }));
-
-      setNotifications(mappedItems);
-
-      const latestElection = mappedItems[0];
-      const dismissedToastIds = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem(DISMISSED_TOAST_NOTIFICATIONS_KEY) || '[]') : [];
-
-      if (latestElection && !dismissedToastIds.includes(latestElection.id)) {
-        setToastNotification(latestElection);
-      }
-    });
-
-    return () => unsubSystemNotifications();
-  }, []);
-
-  useEffect(() => {
     const unsub = subscribeElectionSettings((settings) => {
       setElectionSettings(settings);
     });
@@ -177,6 +147,8 @@ export default function Navbar() {
   }, []);
 
   const alertStateRef = useRef({
+    openSent: false,
+    oneMinSent: false,
     oneHourSent: false,
     thirtyMinSent: false,
     closedSent: false,
@@ -189,7 +161,7 @@ export default function Navbar() {
     return Number.isNaN(date.getTime()) ? null : date;
   };
 
-  const getLocalNotificationId = (type: 'oneHour' | 'thirtyMin' | 'closed', settings: ElectionSettings) => {
+  const getLocalNotificationId = (type: 'open' | 'oneMin' | 'oneHour' | 'thirtyMin' | 'closed', settings: ElectionSettings) => {
     return `local-election-${type}-${settings.startDate}-${settings.startTime}-${settings.endDate}-${settings.endTime}-${settings.isActive}`;
   };
 
@@ -207,6 +179,8 @@ export default function Navbar() {
     const scheduleKey = `${electionSettings.startDate}-${electionSettings.startTime}-${electionSettings.endDate}-${electionSettings.endTime}-${electionSettings.isActive}`;
     if (alertStateRef.current.scheduleKey !== scheduleKey) {
       alertStateRef.current = {
+        openSent: false,
+        oneMinSent: false,
         oneHourSent: false,
         thirtyMinSent: false,
         closedSent: false,
@@ -216,13 +190,37 @@ export default function Navbar() {
     }
 
     const endDate = getEndDate(electionSettings);
-    if (!endDate || !electionSettings.isActive) return;
+    const startDate = new Date(`${electionSettings.startDate}T${electionSettings.startTime}`);
+    if (!endDate) return;
 
     const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
     const checkAlerts = () => {
       const now = new Date();
       const diff = endDate.getTime() - now.getTime();
+      const minutesLeft = Math.ceil(diff / (1000 * 60));
+      if (now >= startDate && now < endDate && !alertStateRef.current.openSent) {
+        alertStateRef.current.openSent = true;
+        addLocalElectionNotification({
+          id: getLocalNotificationId('open', electionSettings),
+          title: 'Voting is now OPEN',
+          description: `Voting opened and it will end at ${formatTime(endDate)}`,
+          kind: 'election',
+          countdownTarget: endDate,
+        });
+        return;
+      }
+      if (minutesLeft <= 1 && diff > 0 && !alertStateRef.current.oneMinSent) {
+        alertStateRef.current.oneMinSent = true;
+        addLocalElectionNotification({
+          id: getLocalNotificationId('oneMin', electionSettings),
+          title: 'Voting ends in 1 minute',
+          description: `Voting ends at ${formatTime(endDate)}`,
+          kind: 'election',
+          countdownTarget: endDate,
+        });
+        return;
+      }
       if (diff <= 0 && !alertStateRef.current.closedSent) {
         alertStateRef.current.closedSent = true;
         addLocalElectionNotification({
@@ -230,34 +228,45 @@ export default function Navbar() {
           title: 'Voting is now CLOSED',
           description: `Voting closed at ${formatTime(endDate)}`,
           kind: 'election',
+          countdownTarget: endDate,
         });
         return;
       }
-      if (diff <= 30 * 60 * 1000 && diff > 0 && !alertStateRef.current.thirtyMinSent) {
+      if (minutesLeft === 30 && !alertStateRef.current.thirtyMinSent) {
         alertStateRef.current.thirtyMinSent = true;
         addLocalElectionNotification({
           id: getLocalNotificationId('thirtyMin', electionSettings),
           title: 'Voting ends in 30 minutes',
           description: `Voting ends at ${formatTime(endDate)}`,
           kind: 'election',
+          countdownTarget: endDate,
         });
         return;
       }
-      if (diff <= 60 * 60 * 1000 && diff > 30 * 60 * 1000 && !alertStateRef.current.oneHourSent) {
+      if (minutesLeft === 60 && !alertStateRef.current.oneHourSent) {
         alertStateRef.current.oneHourSent = true;
         addLocalElectionNotification({
           id: getLocalNotificationId('oneHour', electionSettings),
           title: 'Voting ends in 1 hour',
           description: `Voting ends at ${formatTime(endDate)}`,
           kind: 'election',
+          countdownTarget: endDate,
         });
         return;
       }
     };
 
     checkAlerts();
-    const interval = window.setInterval(checkAlerts, 20 * 1000);
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(checkAlerts, 5000);
+    const closeDelay = endDate.getTime() - Date.now();
+    const closeTimer = closeDelay > 0 ? window.setTimeout(checkAlerts, closeDelay + 250) : null;
+
+    return () => {
+      window.clearInterval(interval);
+      if (closeTimer) {
+        window.clearTimeout(closeTimer);
+      }
+    };
   }, [electionSettings]);
 
   useEffect(() => {
@@ -267,19 +276,12 @@ export default function Navbar() {
   }, [toastNotification]);
 
   useEffect(() => {
-    if (!toastNotification?.description) {
+    if (!toastNotification?.countdownTarget) {
       setToastCountdown(null);
       return;
     }
 
-    const parseEndDateFromDescription = (description: string): Date | null => {
-      const parts = description.split("→").map((part) => part.trim());
-      const endPart = parts[1] ?? parts[0];
-      const parsed = new Date(endPart.replace(" ", "T"));
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
-    };
-
-    const endDate = parseEndDateFromDescription(toastNotification.description);
+    const endDate = toastNotification.countdownTarget;
     const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
     const updateCountdown = () => {
@@ -292,6 +294,11 @@ export default function Navbar() {
       const diff = endDate.getTime() - now.getTime();
       if (diff <= 0) {
         setToastCountdown('Voting is now closed');
+        return;
+      }
+      if (diff <= 60 * 1000) {
+        const minutes = Math.max(1, Math.ceil(diff / (1000 * 60)));
+        setToastCountdown(`Voting ends in ${minutes} minute${minutes === 1 ? '' : 's'}`);
         return;
       }
       if (diff <= 30 * 60 * 1000) {
@@ -321,8 +328,7 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const allNotifications = [...localNotifications, ...notifications];
-  const visibleNotifications = allNotifications.filter((item) => !dismissedNotificationIds.includes(item.id));
+  const visibleNotifications = localNotifications.filter((item) => !dismissedNotificationIds.includes(item.id));
   const unreadCount = visibleNotifications.filter((item) => !readNotificationIds.includes(item.id)).length;
 
   const persistReadNotificationIds = (next: string[]) => {
@@ -368,11 +374,18 @@ export default function Navbar() {
     }
   };
 
-  const toastIsOpen = toastNotification?.title.toLowerCase().includes('open') ?? false;
-  const toastToneClasses = toastIsOpen
+  const isVotingOpen = useMemo(() => {
+    if (!electionSettings || !toastNotification) return false;
+    const startDate = new Date(`${electionSettings.startDate}T${electionSettings.startTime}`);
+    const endDate = new Date(`${electionSettings.endDate}T${electionSettings.endTime}`);
+    const now = new Date();
+    return now >= startDate && now <= endDate;
+  }, [electionSettings, toastNotification]);
+
+  const toastToneClasses = isVotingOpen
     ? 'border-emerald-200 bg-gradient-to-br from-emerald-600 via-emerald-500 to-lime-500 shadow-[0_24px_70px_-20px_rgba(16,185,129,0.45)]'
     : 'border-red-200 bg-gradient-to-br from-red-600 via-red-500 to-orange-500 shadow-[0_24px_70px_-20px_rgba(220,38,38,0.45)]';
-  const toastAccentLine = toastIsOpen ? 'bg-white/45' : 'bg-white/40';
+  const toastAccentLine = isVotingOpen ? 'bg-white/45' : 'bg-white/40';
 
   const handleLogout = () => {
     localStorage.removeItem('voterId');
@@ -457,8 +470,7 @@ export default function Navbar() {
                   <CalendarClock size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-white/85">Realtime Election Alert</p>
-                  <h3 className="mt-1 text-[13px] font-black leading-tight text-white">{toastNotification.title}</h3>
+                  <h3 className="text-[13px] font-black leading-tight text-white">{toastNotification.title}</h3>
                   <p className="mt-1 text-[11px] font-medium leading-relaxed text-white/85">{toastNotification.description}</p>
                   {toastCountdown ? (
                     <p className="mt-2 text-[11px] font-semibold leading-relaxed text-white/90">{toastCountdown}</p>
@@ -554,7 +566,8 @@ export default function Navbar() {
                       ) : (
                         visibleNotifications.map((item) => {
                           const isRead = readNotificationIds.includes(item.id);
-                          const isElectionOpen = item.title.toLowerCase().includes('open');
+                          const isClosed = item.title.toLowerCase().includes('closed');
+                          const isOpen = item.title.toLowerCase().includes('open');
                           return (
                             <motion.div
                               key={item.id}
@@ -563,13 +576,15 @@ export default function Navbar() {
                               className={`relative mb-1.5 rounded-2xl border p-3 transition-all ${
                                 isRead
                                   ? 'border-gray-100 bg-gray-50/70'
-                                  : isElectionOpen
+                                  : isOpen
                                     ? 'border-emerald-200 bg-emerald-50 shadow-sm'
-                                    : 'border-red-200 bg-red-50 shadow-sm'
+                                    : isClosed
+                                      ? 'border-red-200 bg-red-50 shadow-sm'
+                                      : 'border-orange-200 bg-orange-50 shadow-sm'
                               }`}
                             >
                               <div className="flex gap-3 pr-8">
-                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isElectionOpen ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isOpen ? 'bg-emerald-100 text-emerald-600' : isClosed ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
                                   <CalendarClock size={18} strokeWidth={2.2} />
                                 </div>
                                 <button type="button" onClick={() => openNotification(item)} className="flex-1 text-left">

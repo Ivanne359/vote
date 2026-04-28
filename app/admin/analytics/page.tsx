@@ -99,29 +99,32 @@ export default function AdminAnalyticsPage() {
     return values.length ? Math.max(...values) : 1;
   }, [analytics.votesByPosition]);
 
-  const sortedSections = useMemo(() => {
-    return Object.entries(analytics.activeSections).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  }, [analytics.activeSections]);
-
   const topCandidates = useMemo(() => {
     return ELECTION_POSITIONS.map((position) => {
-      const candidatesForPosition = candidates.filter((candidate) => candidate.position === position);
-      if (candidatesForPosition.length === 0) {
-        return { position, name: "No candidate", votes: 0 };
+      const candidatesForPosition = candidates
+        .filter((candidate) => candidate.position === position)
+        .map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+          votes: analytics.candidateVotes[candidate.id] ?? 0,
+        }))
+        .sort((left, right) => right.votes - left.votes || left.name.localeCompare(right.name));
+
+      if (position === "Business Manager (Select 2)") {
+        return {
+          position,
+          names: candidatesForPosition.slice(0, 2),
+          isSelectTwo: true,
+        };
       }
 
-      const leader = candidatesForPosition.reduce(
-        (best, candidate) => {
-          const votes = analytics.candidateVotes[candidate.id] ?? 0;
-          if (!best || votes > best.votes) {
-            return { position, name: candidate.name, votes };
-          }
-          return best;
-        },
-        null as { position: string; name: string; votes: number } | null,
-      );
-
-      return leader ?? { position, name: "No candidate", votes: 0 };
+      const leader = candidatesForPosition[0];
+      return {
+        position,
+        name: leader?.name ?? "No candidate",
+        votes: leader?.votes ?? 0,
+        isSelectTwo: false,
+      };
     });
   }, [analytics.candidateVotes, candidates]);
 
@@ -163,7 +166,7 @@ export default function AdminAnalyticsPage() {
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <div className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-wide ${hasElectionEnded ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-            <FileSpreadsheet size={14} /> {hasElectionEnded ? "Report download ready" : "Report locked until voting ends"}
+            <FileSpreadsheet size={14} /> {hasElectionEnded ? "Result is ready to download" : "Report locked until voting ends"}
           </div>
           {lastReportName ? (
             <p className="text-xs font-semibold text-gray-600">Latest file: {lastReportName}</p>
@@ -243,40 +246,36 @@ export default function AdminAnalyticsPage() {
         <h2 className="text-2xl font-[900] text-gray-900">Leading Candidates</h2>
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           {topCandidates.map((leader) => (
-            <div key={leader.position} className="rounded-3xl border border-gray-100 bg-gray-50 p-4">
+            <div key={leader.position} className="flex flex-col rounded-3xl border border-gray-100 bg-gray-50 p-4">
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">{leader.position}</p>
-              <p className="mt-3 text-lg font-black text-gray-900">{leader.name}</p>
-              <p className="mt-1 text-sm font-semibold text-gray-500">{leader.votes} vote{leader.votes === 1 ? "" : "s"}</p>
+
+              {leader.isSelectTwo ? (
+                <div className="mt-2 flex flex-1 flex-col justify-center space-y-2">
+                  {leader.names.length > 0 ? (
+                    leader.names.map((candidate, index) => (
+                      <div key={`${leader.position}-${candidate.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-orange-100 bg-white px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-gray-900">#{index + 1} {candidate.name}</p>
+                          <p className="text-[10px] font-semibold text-gray-500">Vote leader</p>
+                        </div>
+                        <p className="whitespace-nowrap text-xs font-black text-[#f05a28]">{candidate.votes}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs font-semibold text-gray-500">No candidate</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col justify-center">
+                  <p className="mt-2 text-lg font-black text-gray-900">{leader.name}</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-500">{leader.votes} vote{leader.votes === 1 ? "" : "s"}</p>
+                </div>
+              )}
             </div>
           ))}
         </div>
       </motion.article>
 
-      <motion.article
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-        className="rounded-3xl border border-gray-100 bg-white p-7 shadow-sm"
-      >
-          <h2 className="text-2xl font-[900] text-gray-900">Most Active Sections</h2>
-          <div className="mt-5 space-y-3">
-            {sortedSections.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm font-semibold text-gray-500">
-                No section activity yet.
-              </p>
-            ) : (
-              sortedSections.map(([section, votes], index) => (
-                <div key={section} className="flex items-center justify-between rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f05a28] text-xs font-black text-white">{index + 1}</span>
-                    <p className="text-sm font-black text-gray-800">{section}</p>
-                  </div>
-                  <p className="text-sm font-black text-[#f05a28]">{votes}</p>
-                </div>
-              ))
-            )}
-          </div>
-        </motion.article>
       </section>
     </div>
   );

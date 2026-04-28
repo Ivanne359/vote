@@ -76,6 +76,14 @@ const buildReportRows = ({ candidates, candidateVotes }: ReportContext) => {
     "Winning Votes": string;
   }> = [];
 
+  const multiSelectRows: Array<{
+    Position: string;
+    Rank: number | string;
+    Candidate: string;
+    "Vote Count": number;
+    Winner: string;
+  }> = [];
+
   ELECTION_POSITIONS.forEach((position) => {
     const candidatesForPosition = candidates.filter((candidate) => candidate.position === position);
     if (candidatesForPosition.length === 0) {
@@ -101,6 +109,7 @@ const buildReportRows = ({ candidates, candidateVotes }: ReportContext) => {
       .filter((candidate) => candidate.rank <= slots)
       .map((candidate) => ({ ...candidate, isWinner: true }));
 
+    // Add to regular detailed rows
     ranked.forEach((candidate) => {
       detailedRows.push({
         Position: position,
@@ -111,6 +120,19 @@ const buildReportRows = ({ candidates, candidateVotes }: ReportContext) => {
       });
     });
 
+    // If multi-select position, also add to multiSelectRows for dedicated sheet
+    if (slots > 1) {
+      ranked.forEach((candidate) => {
+        multiSelectRows.push({
+          Position: position,
+          Rank: candidate.rank,
+          Candidate: candidate.name,
+          "Vote Count": candidate.votes,
+          Winner: candidate.rank <= slots ? "Yes" : "No",
+        });
+      });
+    }
+
     winnerSummaryRows.push({
       Position: position,
       Winners: winners.map((winner) => winner.name).join(", ") || "No winner",
@@ -118,7 +140,7 @@ const buildReportRows = ({ candidates, candidateVotes }: ReportContext) => {
     });
   });
 
-  return { detailedRows, winnerSummaryRows };
+  return { detailedRows, winnerSummaryRows, multiSelectRows };
 };
 
 export const downloadElectionResultsExcel = ({
@@ -145,7 +167,7 @@ export const downloadElectionResultsExcel = ({
         ? "OPEN"
         : "CLOSED";
 
-  const { detailedRows, winnerSummaryRows } = buildReportRows({
+  const { detailedRows, winnerSummaryRows, multiSelectRows } = buildReportRows({
     candidates,
     candidateVotes,
     electionSettings,
@@ -185,6 +207,13 @@ export const downloadElectionResultsExcel = ({
   const detailedSheet = XLSX.utils.json_to_sheet(detailedRows);
   applySheetLayout(detailedSheet, [34, 8, 34, 14, 12]);
   XLSX.utils.book_append_sheet(workbook, detailedSheet, "Rankings");
+
+  // Add dedicated sheet for multi-select positions if any exist
+  if (multiSelectRows.length > 0) {
+    const multiSelectSheet = XLSX.utils.json_to_sheet(multiSelectRows);
+    applySheetLayout(multiSelectSheet, [34, 8, 34, 14, 12]);
+    XLSX.utils.book_append_sheet(workbook, multiSelectSheet, "Multi-Select Positions");
+  }
 
   const fileName = `election-results-${timestamp}.xlsx`;
   XLSX.writeFile(workbook, fileName);

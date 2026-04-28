@@ -25,7 +25,7 @@ import {
 	User,
 	AlertCircle,
 } from "lucide-react";
-import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 const POSITIONS = [
@@ -50,6 +50,11 @@ type StepType = "form" | "ballot";
 const STEP_STORAGE_KEY = "cetvote_step";
 const SECTION_STORAGE_KEY = "cetvote_section";
 const HIDE_NAME_STORAGE_KEY = "cetvote_hide_name";
+const SELECTED_CANDIDATES_STORAGE_KEY = "cetvote_selected_candidates";
+
+const SELECT_2_POSITIONS = ["Business Manager (Select 2)"];
+
+const isSelectNPosition = (position: string) => SELECT_2_POSITIONS.includes(position);
 
 const defaultElection: ElectionSettings = {
 	startDate: new Date().toISOString().split("T")[0],
@@ -61,8 +66,8 @@ const defaultElection: ElectionSettings = {
 
 export default function CandidatesPage() {
 	const [hasVoted, setHasVoted] = useState(false);
-	const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string>>({});
-	const [submittedVotes, setSubmittedVotes] = useState<Record<string, string>>({});
+	const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string | string[]>>({});
+	const [submittedVotes, setSubmittedVotes] = useState<Record<string, string | string[]>>();
 	const [isConfirming, setIsConfirming] = useState(false);
 	const [showSummary, setShowSummary] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
@@ -121,6 +126,7 @@ export default function CandidatesPage() {
 		const storedStep = localStorage.getItem(STEP_STORAGE_KEY);
 		const storedSection = localStorage.getItem(SECTION_STORAGE_KEY);
 		const storedHideName = localStorage.getItem(HIDE_NAME_STORAGE_KEY);
+		const storedCandidates = localStorage.getItem(SELECTED_CANDIDATES_STORAGE_KEY);
 
 		if (storedSection) {
 			setFormData((prev) => ({ ...prev, section: storedSection }));
@@ -128,6 +134,17 @@ export default function CandidatesPage() {
 
 		if (storedHideName) {
 			setFormData((prev) => ({ ...prev, hideName: storedHideName === "1" }));
+		}
+
+		if (storedCandidates) {
+			try {
+				const parsed = JSON.parse(storedCandidates) as Record<string, string | string[]>;
+				if (parsed && typeof parsed === "object") {
+					setSelectedCandidates(parsed);
+				}
+			} catch {
+				// ignore invalid saved data
+			}
 		}
 
 		if (storedStep === "ballot") {
@@ -141,6 +158,11 @@ export default function CandidatesPage() {
 		localStorage.setItem(HIDE_NAME_STORAGE_KEY, formData.hideName ? "1" : "0");
 	}, [formData.section, formData.hideName]);
 
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		localStorage.setItem(SELECTED_CANDIDATES_STORAGE_KEY, JSON.stringify(selectedCandidates));
+	}, [selectedCandidates]);
+
 	const { scrollYProgress } = useScroll();
 	const scaleX = useSpring(scrollYProgress, {
 		stiffness: 100,
@@ -148,10 +170,28 @@ export default function CandidatesPage() {
 		restDelta: 0.001,
 	});
 
-	const progress = useMemo(() => {
-		return (Object.keys(selectedCandidates).length / POSITIONS.length) * 100;
+	// Helper function to check if a position is fully selected
+	const isPositionSelected = useCallback((position: string): boolean => {
+		const selection = selectedCandidates[position];
+		if (!selection) return false;
+		
+		// Abstain is always a valid selection
+		if (selection === "abstain") return true;
+		
+		if (isSelectNPosition(position)) {
+			// For select-2 positions, must have exactly 2 selections
+			return Array.isArray(selection) && selection.length === 2;
+		}
+		// For regular positions, must be a non-empty string
+		return typeof selection === "string" && selection.length > 0;
 	}, [selectedCandidates]);
-	const selectedCount = Object.keys(selectedCandidates).length;
+
+	const progress = useMemo(() => {
+		const fullPositions = POSITIONS.filter(pos => isPositionSelected(pos)).length;
+		return (fullPositions / POSITIONS.length) * 100;
+	}, [selectedCandidates, isPositionSelected]);
+
+	const selectedCount = POSITIONS.filter(pos => isPositionSelected(pos)).length;
 
 	useEffect(() => {
 		const savedName = typeof window !== "undefined" ? localStorage.getItem("voterName") : null;
@@ -258,13 +298,22 @@ export default function CandidatesPage() {
 	}, []);
 
 	const handleVoteSubmit = useCallback(() => {
-		if (selectedCount < POSITIONS.length) {
-			const missing = POSITIONS.filter((p) => !selectedCandidates[p]);
-			alert(`Please cast your vote for: ${missing[0]}`);
+		// Check all positions have valid selections
+		const missing = POSITIONS.filter(pos => !isPositionSelected(pos));
+		
+		if (missing.length > 0) {
+			const missingPos = missing[0];
+			if (isSelectNPosition(missingPos)) {
+				const currentSelection = selectedCandidates[missingPos];
+				const count = Array.isArray(currentSelection) ? currentSelection.length : 0;
+				alert(`Please select 2 candidates for ${missingPos}. You have selected ${count}/2.`);
+			} else {
+				alert(`Please cast your vote for: ${missingPos}`);
+			}
 			return;
 		}
 		setIsConfirming(true);
-	}, [selectedCandidates, selectedCount]);
+	}, [selectedCandidates, isPositionSelected]);
 
 	const finalSubmit = useCallback(async () => {
 		if (!db) {
@@ -276,22 +325,22 @@ export default function CandidatesPage() {
 
 		try {
 			const voteId = formData.idNumber.trim();
-			const voteRef = doc(db, "votes", voteId);
-			const existingVote = await getDoc(voteRef);
 
-			if (existingVote.exists()) {
-				alert("You already submitted your vote.");
-				setSubmitting(false);
-				setIsConfirming(false);
-				return;
-			}
+			await runTransaction(db, async (transaction) => {
+				const voteRef = doc(db, "votes", voteId);
+				const existingVote = await transaction.get(voteRef);
 
-			await setDoc(voteRef, {
-				voterId: voteId,
-				voterName: formData.hideName ? "Anonymous Voter" : formData.name,
-				section: formData.section,
-				selections: selectedCandidates,
-				createdAt: serverTimestamp(),
+				if (existingVote.exists()) {
+					throw new Error("You already submitted your vote.");
+				}
+
+				transaction.set(voteRef, {
+					voterId: voteId,
+					voterName: formData.hideName ? "Anonymous Voter" : formData.name,
+					section: formData.section,
+					selections: selectedCandidates,
+					createdAt: serverTimestamp(),
+				});
 			});
 
 			if (typeof window !== "undefined") {
@@ -300,8 +349,8 @@ export default function CandidatesPage() {
 
 			setSubmittedVotes(selectedCandidates);
 			setHasVoted(true);
-		} catch {
-			alert("Unable to submit vote. Please try again.");
+		} catch (error) {
+			alert(error instanceof Error ? error.message : "Unable to submit vote. Please try again.");
 		} finally {
 			setSubmitting(false);
 		}
@@ -342,10 +391,45 @@ export default function CandidatesPage() {
 	}, []);
 
 	const handleLiveCandidateSelect = useCallback((position: string, candidateId: string) => {
-		setSelectedCandidates((prev) => ({
-			...prev,
-			[position]: candidateId,
-		}));
+		setSelectedCandidates((prev) => {
+			if (isSelectNPosition(position)) {
+				// Handle multi-select positions
+				const current = prev[position];
+				const selections = Array.isArray(current) ? current : [];
+
+				// If candidate is already selected, deselect
+				if (selections.includes(candidateId)) {
+					const nextSelections = selections.filter((id) => id !== candidateId);
+					if (nextSelections.length === 0) {
+						const next = { ...prev };
+						delete next[position];
+						return next;
+					}
+					return {
+						...prev,
+						[position]: nextSelections,
+					};
+				}
+
+				// If not yet 2 selected, add the candidate
+				if (selections.length < 2) {
+					return {
+						...prev,
+						[position]: [...selections, candidateId],
+					};
+				}
+
+				// If already 2 selected, show alert
+				alert(`You can only select 2 candidates for ${position}`);
+				return prev;
+			} else {
+				// Handle single-select positions (existing behavior)
+				return {
+					...prev,
+					[position]: candidateId,
+				};
+			}
+		});
 	}, []);
 
 	const openCandidateDetails = useCallback((position: string, candidate: CandidateRecord) => {
@@ -419,11 +503,24 @@ export default function CandidatesPage() {
 							<h3 className="text-lg font-black text-gray-900 mb-4 uppercase tracking-tight">Your Ballot Summary</h3>
 							<div className="space-y-3">
 								{POSITIONS.map((position) => {
-									const voteId = submittedVotes[position];
-									const selectedCandidate = liveCandidates.find(c => c.id === voteId);
-									const candidateName = voteId === "abstain" 
-										? "ABSTAINED" 
-										: selectedCandidate?.name || "SELECTION RECORDED";
+									const vote = submittedVotes?.[position];
+									let candidateNames: string | string[];
+
+									if (vote === "abstain") {
+										candidateNames = "ABSTAINED";
+									} else if (isSelectNPosition(position) && Array.isArray(vote)) {
+										// For select-2 positions, show both candidate names
+										const names = vote
+											.map((id) => liveCandidates.find((c) => c.id === id)?.name)
+											.filter(Boolean);
+										candidateNames = names.length > 0 ? names : ["NO SELECTIONS"];
+									} else if (typeof vote === "string" && vote.length > 0) {
+										// For regular positions
+										const selectedCandidate = liveCandidates.find((c) => c.id === vote);
+										candidateNames = selectedCandidate?.name || "SELECTION RECORDED";
+									} else {
+										candidateNames = "NO SELECTION";
+									}
 
 									return (
 										<motion.div
@@ -434,7 +531,17 @@ export default function CandidatesPage() {
 										>
 											<div className="flex-1 min-w-0">
 												<p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">{position}</p>
-												<p className="text-sm font-black text-gray-900 truncate">{candidateName}</p>
+												{Array.isArray(candidateNames) ? (
+													<div className="space-y-1">
+														{candidateNames.map((name, idx) => (
+															<p key={idx} className="text-sm font-black text-gray-900">
+																✓ {name}
+															</p>
+														))}
+													</div>
+												) : (
+													<p className="text-sm font-black text-gray-900">{candidateNames}</p>
+												)}
 											</div>
 											<CheckCircle size={20} className="text-green-500 flex-shrink-0 mt-1" />
 										</motion.div>
@@ -567,8 +674,16 @@ export default function CandidatesPage() {
 											</h3>
 											<div className="flex items-center gap-3">
 												<span className="h-0.5 w-8 bg-[#f05a28]" />
-												<p className={`text-[10px] font-black uppercase tracking-[0.3em] ${selectedCandidates[pos] ? "text-green-600" : "text-[#f05a28]"}`}>
-													{selectedCandidates[pos] ? "Selection Captured" : "Required Selection"}
+												<p className={`text-[10px] font-black uppercase tracking-[0.3em] ${isPositionSelected(pos) ? "text-green-600" : "text-[#f05a28]"}`}>
+													{(() => {
+														if (isSelectNPosition(pos)) {
+															const selection = selectedCandidates[pos];
+															if (selection === "abstain") return "ABSTAINED";
+															const count = Array.isArray(selection) ? selection.length : 0;
+															return count > 0 ? `Selected ${count}/2` : "Required Selection (2)";
+														}
+														return selectedCandidates[pos] ? "Selection Captured" : "Required Selection";
+													})()}
 												</p>
 											</div>
 										</div>
@@ -589,22 +704,32 @@ export default function CandidatesPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 justify-items-center">
 									{liveCandidates
 										.filter((candidate) => candidate.position === pos)
-										.map((candidate) => (
-											<CandidateCard
-												key={candidate.id}
-												name={candidate.name}
-												section={candidate.section || "TBA"}
-												bio={candidate.platform || "Platform to be announced."}
-												partylist={candidate.partylist}
-												motto={candidate.motto}
-												image={candidate.photoUrl}
-												candidateId={candidate.id}
-												isSelected={selectedCandidates[pos] === candidate.id}
-												onSelect={() => openCandidateDetails(pos, candidate)}
-												onViewProfile={() => openCandidateDetails(pos, candidate)}
-												onVoteNow={() => handleLiveCandidateSelect(pos, candidate.id)}
-											/>
-										))}
+										.map((candidate) => {
+											let isSelected = false;
+											const selection = selectedCandidates[pos];
+											if (isSelectNPosition(pos)) {
+												isSelected = Array.isArray(selection) && selection.includes(candidate.id);
+											} else {
+												isSelected = selection === candidate.id;
+											}
+
+											return (
+												<CandidateCard
+													key={candidate.id}
+													name={candidate.name}
+													section={candidate.section || "TBA"}
+													bio={candidate.platform || "Platform to be announced."}
+													partylist={candidate.partylist}
+													motto={candidate.motto}
+													image={candidate.photoUrl}
+													candidateId={candidate.id}
+													isSelected={isSelected}
+													onSelect={() => openCandidateDetails(pos, candidate)}
+													onViewProfile={() => openCandidateDetails(pos, candidate)}
+													onVoteNow={() => handleLiveCandidateSelect(pos, candidate.id)}
+												/>
+											);
+										})}
 								</div>
 							</motion.section>
 						))}
@@ -947,11 +1072,19 @@ export default function CandidatesPage() {
 							<div className="space-y-4">
 								{POSITIONS.map((pos) => {
 									const voteId = selectedCandidates[pos];
-									const selectedCandidate = liveCandidates.find(c => c.id === voteId);
-									const displayName = voteId === "abstain" 
-										? "ABSTAINED" 
-										: selectedCandidate?.name || (voteId ? "SELECTION RECORDED" : "PENDING");
+						const selectedCandidate = typeof voteId === "string" ? liveCandidates.find(c => c.id === voteId) : undefined;
+						let displayName: string | string[];
 
+						if (voteId === "abstain") {
+							displayName = "ABSTAINED";
+						} else if (Array.isArray(voteId)) {
+							const names = voteId
+								.map((id) => liveCandidates.find((c) => c.id === id)?.name)
+								.filter(Boolean);
+							displayName = names.length > 0 ? names.join(" & ") : voteId.length > 0 ? "SELECTION RECORDED" : "PENDING";
+						} else {
+							displayName = selectedCandidate?.name || (voteId ? "SELECTION RECORDED" : "PENDING");
+						}
 									return (
 										<motion.div
 											key={pos}

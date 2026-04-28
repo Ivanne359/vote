@@ -25,7 +25,7 @@ import {
 	User,
 	AlertCircle,
 } from "lucide-react";
-import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from "firebase/firestore";
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 const POSITIONS = [
@@ -327,7 +327,7 @@ export default function CandidatesPage() {
 			const voteId = formData.idNumber.trim();
 
 			await runTransaction(db, async (transaction) => {
-				const voteRef = doc(db, "votes", voteId);
+				const voteRef = doc(db!, "votes", voteId);
 				const existingVote = await transaction.get(voteRef);
 
 				if (existingVote.exists()) {
@@ -512,7 +512,7 @@ export default function CandidatesPage() {
 										// For select-2 positions, show both candidate names
 										const names = vote
 											.map((id) => liveCandidates.find((c) => c.id === id)?.name)
-											.filter(Boolean);
+											.filter((n): n is string => Boolean(n));
 										candidateNames = names.length > 0 ? names : ["NO SELECTIONS"];
 									} else if (typeof vote === "string" && vote.length > 0) {
 										// For regular positions

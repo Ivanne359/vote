@@ -251,7 +251,7 @@ export default function AdminAnalyticsPage() {
 
               {leader.isSelectTwo ? (
                 <div className="mt-2 flex flex-1 flex-col justify-center space-y-2">
-                  {leader.names.length > 0 ? (
+                  {Array.isArray(leader.names) && leader.names.length > 0 ? (
                     leader.names.map((candidate, index) => (
                       <div key={`${leader.position}-${candidate.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-orange-100 bg-white px-3 py-2">
                         <div className="min-w-0">

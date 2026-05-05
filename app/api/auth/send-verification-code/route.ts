@@ -1,52 +1,23 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import fs from "fs";
-import path from "path";
 
 export const runtime = "nodejs";
 
 const CODE_TTL_MS = 3 * 60 * 1000; // 3 minutes
-const RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
 const MAX_VERIFY_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
-const VERIFICATION_STORE_PATH = path.join(process.cwd(), ".verification-codes.json");
-
-const loadVerificationCodesFromDisk = (): Map<string, VerificationEntry> => {
-  try {
-    if (!fs.existsSync(VERIFICATION_STORE_PATH)) {
-      return new Map();
-    }
-
-    const raw = fs.readFileSync(VERIFICATION_STORE_PATH, "utf8");
-    const data = JSON.parse(raw) as Array<[string, VerificationEntry]>;
-    return new Map(data);
-  } catch (error) {
-    console.error("Failed to load verification code store:", error);
-    return new Map();
-  }
-};
-
-const saveVerificationCodesToDisk = (codes: Map<string, VerificationEntry>) => {
-  try {
-    fs.writeFileSync(VERIFICATION_STORE_PATH, JSON.stringify(Array.from(codes.entries())), "utf8");
-  } catch (error) {
-    console.error("Failed to save verification code store:", error);
-  }
-};
 
 type VerificationEntry = {
+  email: string;
   codeHash: string;
   salt: string;
   expiresAt: number;
-  lastSentAt: number;
   attempts: number;
   lockedUntil: number | null;
 };
 
-const generateVerificationCode = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
+const generateVerificationCode = (): string => Math.floor(100000 + Math.random() * 900000).toString();
 
 const hashVerificationCode = (email: string, code: string, salt: string): string => {
   return createHash("sha256").update(`${email}:${code}:${salt}`).digest("hex");
@@ -61,42 +32,56 @@ const safeCompareHashes = (a: string, b: string): boolean => {
   return timingSafeEqual(aBuffer, bBuffer);
 };
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __cetvoteVerificationCodes: Map<string, VerificationEntry> | undefined;
-}
+const parseCookies = (cookieHeader: string | null): Record<string, string> => {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
 
-const inMemoryVerificationCodes: Map<string, VerificationEntry> =
-  globalThis.__cetvoteVerificationCodes || loadVerificationCodesFromDisk();
+  cookieHeader.split(";").forEach((pair) => {
+    const [rawName, ...rest] = pair.split("=");
+    const name = rawName?.trim();
+    const value = rest.join("=").trim();
+    if (name) {
+      cookies[name] = decodeURIComponent(value);
+    }
+  });
 
-if (!globalThis.__cetvoteVerificationCodes) {
-  globalThis.__cetvoteVerificationCodes = inMemoryVerificationCodes;
-}
+  return cookies;
+};
 
-const verificationCodes: Map<string, VerificationEntry> = inMemoryVerificationCodes;
+const createVerificationCookieValue = (entry: VerificationEntry): string => {
+  return encodeURIComponent(Buffer.from(JSON.stringify(entry), "utf8").toString("base64"));
+};
 
-const persistMap = () => saveVerificationCodesToDisk(verificationCodes);
+const parseVerificationCookieValue = (value: string | undefined | null): VerificationEntry | null => {
+  if (!value) return null;
+
+  try {
+    const decoded = Buffer.from(decodeURIComponent(value), "base64").toString("utf8");
+    return JSON.parse(decoded) as VerificationEntry;
+  } catch (error) {
+    return null;
+  }
+};
+
+const createCookieHeader = (value: string, maxAge: number): string => {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `cetvote_verification=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+};
+
+const clearCookieHeader = (): string => {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `cetvote_verification=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+};
 
 export async function POST(request: Request) {
   try {
     const { email } = await request.json();
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
 
-    // Validate email domain
     if (!normalizedEmail || !normalizedEmail.endsWith("@hcdc.edu.ph")) {
       return NextResponse.json(
         { error: "Only @hcdc.edu.ph email addresses are allowed" },
         { status: 400 }
-      );
-    }
-
-    const now = Date.now();
-    const existing = verificationCodes.get(normalizedEmail);
-    if (existing && now < existing.expiresAt && now - existing.lastSentAt < RESEND_COOLDOWN_MS) {
-      const retryAfterSeconds = Math.ceil((RESEND_COOLDOWN_MS - (now - existing.lastSentAt)) / 1000);
-      return NextResponse.json(
-        { error: `Please wait ${retryAfterSeconds}s before requesting a new code.` },
-        { status: 429 }
       );
     }
 
@@ -105,18 +90,18 @@ export async function POST(request: Request) {
     const salt = randomBytes(16).toString("hex");
     const codeHash = hashVerificationCode(normalizedEmail, code, salt);
 
-    // Store the code
-    verificationCodes.set(normalizedEmail, {
+    const verificationEntry: VerificationEntry = {
+      email: normalizedEmail,
       codeHash,
       salt,
       expiresAt,
-      lastSentAt: now,
       attempts: 0,
       lockedUntil: null,
-    });
-    persistMap();
+    };
 
-    // Send email with code
+    const cookieValue = createVerificationCookieValue(verificationEntry);
+    const cookieHeader = createCookieHeader(cookieValue, CODE_TTL_MS / 1000);
+
     try {
       const emailUser = process.env.EMAIL_USER?.trim();
       const emailPassword = process.env.EMAIL_PASSWORD?.replace(/\s+/g, "").trim();
@@ -181,10 +166,13 @@ export async function POST(request: Request) {
         `,
       });
 
-      return NextResponse.json({
-        success: true,
-        message: "Verification code sent to your email",
-      });
+      return NextResponse.json(
+        {
+          success: true,
+          message: "Verification code sent to your email",
+        },
+        { headers: { "Set-Cookie": cookieHeader } }
+      );
     } catch (emailError) {
       console.error("Email sending error:", emailError);
       return NextResponse.json(
@@ -214,12 +202,14 @@ export async function PUT(request: Request) {
       );
     }
 
-    const stored = verificationCodes.get(normalizedEmail);
+    const cookieHeader = request.headers.get("cookie");
+    const cookies = parseCookies(cookieHeader);
+    const stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
 
-    if (!stored) {
+    if (!stored || stored.email !== normalizedEmail) {
       return NextResponse.json(
         { error: "No verification code found for this email" },
-        { status: 400 }
+        { status: 400, headers: { "Set-Cookie": clearCookieHeader() } }
       );
     }
 
@@ -227,15 +217,14 @@ export async function PUT(request: Request) {
       const retryAfterSeconds = Math.ceil((stored.lockedUntil - Date.now()) / 1000);
       return NextResponse.json(
         { error: `Too many attempts. Try again in ${retryAfterSeconds}s.` },
-        { status: 429 }
+        { status: 429, headers: { "Set-Cookie": createCookieHeader(createVerificationCookieValue(stored), Math.max(Math.ceil((stored.expiresAt - Date.now()) / 1000), 1)) } }
       );
     }
 
     if (Date.now() > stored.expiresAt) {
-      verificationCodes.delete(normalizedEmail);
       return NextResponse.json(
         { error: "Verification code has expired" },
-        { status: 400 }
+        { status: 400, headers: { "Set-Cookie": clearCookieHeader() } }
       );
     }
 
@@ -243,13 +232,15 @@ export async function PUT(request: Request) {
     if (!safeCompareHashes(stored.codeHash, computedHash)) {
       const updatedAttempts = stored.attempts + 1;
       const attemptsLeft = Math.max(MAX_VERIFY_ATTEMPTS - updatedAttempts, 0);
-
-      verificationCodes.set(normalizedEmail, {
+      const updatedStored: VerificationEntry = {
         ...stored,
         attempts: updatedAttempts,
         lockedUntil: updatedAttempts >= MAX_VERIFY_ATTEMPTS ? Date.now() + LOCKOUT_MS : null,
-      });
-      persistMap();
+      };
+      const updatedCookie = createCookieHeader(
+        createVerificationCookieValue(updatedStored),
+        Math.max(Math.ceil((updatedStored.expiresAt - Date.now()) / 1000), 1)
+      );
 
       return NextResponse.json(
         {
@@ -258,18 +249,17 @@ export async function PUT(request: Request) {
               ? "Too many invalid attempts. Verification is temporarily locked."
               : `Invalid verification code. ${attemptsLeft} attempt(s) left.`,
         },
-        { status: 400 }
+        { status: 400, headers: { "Set-Cookie": updatedCookie } }
       );
     }
 
-    // Code is valid, delete it
-    verificationCodes.delete(normalizedEmail);
-    persistMap();
-
-    return NextResponse.json({
-      success: true,
-      message: "Email verified successfully",
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Email verified successfully",
+      },
+      { headers: { "Set-Cookie": clearCookieHeader() } }
+    );
   } catch (error) {
     console.error("Error:", error);
     return NextResponse.json(

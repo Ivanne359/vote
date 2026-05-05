@@ -180,20 +180,21 @@ export default function AuthPage() {
     try {
       clearMessages();
       console.log("Starting Google sign-in...");
-      const signedEmail = await signInWithGoogle(true);
-      console.log("Signed email:", signedEmail);
+      const signedUser = await signInWithGoogle(true);
+      console.log("Signed user:", signedUser);
 
-      // For mobile redirect flow, signedEmail will be null
+      // For mobile redirect flow, signedUser will be null
       // The verification flow will be handled by the useEffect above
-      if (signedEmail === null) {
-        // Mobile redirect initiated, loading will be set to false by the useEffect
+      if (signedUser === null) {
         return;
       }
 
-      const currentUser = auth?.currentUser;
-      console.log("Current user:", currentUser);
+      const signedEmail = signedUser.email;
+      const signedUid = signedUser.uid;
+      const signedDisplayName = signedUser.displayName || "Voter";
+      const signedPhotoURL = signedUser.photoURL || "";
 
-      if (!signedEmail || !currentUser?.uid) {
+      if (!signedEmail || !signedUid) {
         throw new Error("Failed to get email from Google account.");
       }
 
@@ -217,8 +218,8 @@ export default function AuthPage() {
         console.log("Existing user found");
         const existingData = userSnapshot.docs[0].data();
         const savedStudentId = String(existingData.studentId || "");
-        const savedName = String(existingData.fullName || existingData.name || currentUser.displayName || "Voter");
-        const savedPic = String(existingData.profilePic || currentUser.photoURL || "");
+        const savedName = String(existingData.fullName || existingData.name || signedDisplayName);
+        const savedPic = String(existingData.profilePic || signedPhotoURL);
 
         if (/^\d{8}$/.test(savedStudentId)) {
           console.log("Valid student ID found, saving session...");
@@ -266,9 +267,9 @@ export default function AuthPage() {
       }
 
       setPendingGoogleEmail(normalizedEmail);
-      setPendingGoogleUid(currentUser.uid);
-      setPendingGoogleName(currentUser.displayName || "Voter");
-      setPendingGooglePic(currentUser.photoURL || "");
+      setPendingGoogleUid(signedUid);
+      setPendingGoogleName(signedDisplayName);
+      setPendingGooglePic(signedPhotoURL);
       setShowVerificationModal(true);
       console.log("Verification modal should be shown");
     } catch (err) {
@@ -294,7 +295,7 @@ export default function AuthPage() {
 
   const handleGoogleVerificationComplete = async () => {
     try {
-      if (!db || !auth?.currentUser) {
+      if (!db) {
         throw new Error("Firebase is not configured.");
       }
 
@@ -303,9 +304,14 @@ export default function AuthPage() {
       const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
       const userSnapshot = await getDocs(userByEmailQuery);
 
-      let docId = auth.currentUser.uid;
-      let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
-      let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
+      const resolvedUid = pendingGoogleUid || auth?.currentUser?.uid;
+      if (!resolvedUid) {
+        throw new Error("Unable to identify signed-in user.");
+      }
+
+      let docId = resolvedUid;
+      let resolvedName = pendingGoogleName || auth?.currentUser?.displayName || "Voter";
+      let resolvedPic = pendingGooglePic || auth?.currentUser?.photoURL || "";
       let resolvedStudentId = "";
 
       if (userSnapshot.empty) {

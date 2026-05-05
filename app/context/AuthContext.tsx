@@ -4,10 +4,17 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 
+interface GoogleSignInResult {
+  email: string;
+  uid: string;
+  displayName?: string | null;
+  photoURL?: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithGoogle: (validateDomain?: boolean) => Promise<string | null>;
+  signInWithGoogle: (validateDomain?: boolean) => Promise<GoogleSignInResult | null>;
   logout: () => Promise<void>;
   userEmail: string | null;
   verifyCode: (email: string, code: string) => Promise<boolean>;
@@ -59,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     handleRedirectResult();
   }, []);
 
-  const signInWithGoogle = async (validateDomain: boolean = true): Promise<string | null> => {
+  const signInWithGoogle = async (validateDomain: boolean = true): Promise<GoogleSignInResult | null> => {
     if (!auth) throw new Error("Firebase Auth is not initialized");
 
     try {
@@ -83,15 +90,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         result = await signInWithPopup(auth, googleProvider);
       }
 
-      const email = result.user.email;
+      const email =
+        result?.user?.email ||
+        (result?.additionalUserInfo?.profile as { email?: string } | null)?.email ||
+        null;
 
       // Validate email domain
-      if (validateDomain && email && !email.endsWith("@hcdc.edu.ph")) {
+      if (validateDomain && (!email || !email.endsWith("@hcdc.edu.ph"))) {
         await signOut(auth);
         throw new Error("Only @hcdc.edu.ph email addresses are allowed");
       }
 
-      return email;
+      if (!email) {
+        await signOut(auth);
+        throw new Error("Failed to obtain email from Google account.");
+      }
+
+      return {
+        email,
+        uid: result.user.uid,
+        displayName: result.user.displayName,
+        photoURL: result.user.photoURL,
+      };
     } catch (error) {
       console.error("Google sign-in error:", error);
       throw error;

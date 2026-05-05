@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
@@ -92,7 +92,32 @@ export default function CandidatesPage() {
 	const [formErrors, setFormErrors] = useState({
 		idNumber: "",
 		section: "",
+		terms: "",
 	});
+
+	const [hasReadTerms, setHasReadTerms] = useState(false);
+	const [canScrollToCheckbox, setCanScrollToCheckbox] = useState(false);
+	const termsNoticeRef = useRef<HTMLDivElement | null>(null);
+
+	const handleTermsScroll = useCallback(() => {
+		const el = termsNoticeRef.current;
+		if (!el) return;
+
+		const reachedBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 10;
+		setCanScrollToCheckbox(reachedBottom);
+	}, []);
+
+	useEffect(() => {
+		if (step !== "form") return;
+
+		const frame = window.requestAnimationFrame(handleTermsScroll);
+		window.addEventListener("resize", handleTermsScroll);
+
+		return () => {
+			window.cancelAnimationFrame(frame);
+			window.removeEventListener("resize", handleTermsScroll);
+		};
+	}, [handleTermsScroll, step]);
 
 	useEffect(() => {
 		const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
@@ -362,6 +387,7 @@ export default function CandidatesPage() {
 		const errors = {
 			idNumber: "",
 			section: "",
+			terms: "",
 		};
 
 		if (!formData.idNumber.trim()) {
@@ -372,9 +398,13 @@ export default function CandidatesPage() {
 			errors.section = "Section is required";
 		}
 
+		if (!hasReadTerms) {
+			errors.terms = "You must read and agree to the terms before proceeding";
+		}
+
 		setFormErrors(errors);
 
-		return !errors.idNumber && !errors.section;
+		return !errors.idNumber && !errors.section && !errors.terms;
 	};
 
 	const handleContinueToBallot = () => {
@@ -850,20 +880,91 @@ export default function CandidatesPage() {
 										</div>
 
 										<div className="mt-8 rounded-[1.8rem] border border-gray-100 bg-gray-50 p-5">
-											<div className="flex items-start gap-4">
+											<div className="flex items-start gap-4 mb-4">
 												<div className="w-12 h-12 rounded-2xl bg-white border border-gray-100 text-[#f05a28] flex items-center justify-center shrink-0">
 													<ShieldCheck size={22} />
 												</div>
 												<div>
 													<p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.25em] mb-2">
-														Confirmation
+														Read Before Viewing Candidates
 													</p>
-													<p className="text-sm text-gray-600 leading-7">
-														By continuing, you confirm that the voter information provided is
-														correct and will be used for CET election verification before showing
-														the candidate list.
+													<p className="text-sm text-gray-600 leading-7 mb-4">
+														Please read and understand the following voter information and election rules before proceeding.
 													</p>
 												</div>
+											</div>
+
+											{/* Scrollable Terms Section */}
+											<div ref={termsNoticeRef} onScroll={handleTermsScroll} className="max-h-64 overflow-y-auto border border-gray-200 rounded-xl bg-white p-4 mb-4 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+												<div className="space-y-4 text-sm text-gray-700 leading-relaxed">
+													<div>
+														<h4 className="font-bold text-gray-900 mb-2">VOTER ELIGIBILITY</h4>
+														<ul className="list-disc list-inside space-y-1 ml-2">
+															<li>You must be a registered CET student with a valid student ID</li>
+															<li>Your email must be verified through our secure authentication system</li>
+															<li>You can only vote once per election period</li>
+															<li>Your vote is anonymous and cannot be traced back to you</li>
+														</ul>
+													</div>
+
+													<div>
+														<h4 className="font-bold text-gray-900 mb-2">ELECTION RULES</h4>
+														<ul className="list-disc list-inside space-y-1 ml-2">
+															<li>Each position requires one vote unless specified otherwise</li>
+															<li>You may abstain from voting for any position</li>
+															<li>All votes are final once submitted</li>
+															<li>Voting is only available during the designated election period</li>
+														</ul>
+													</div>
+
+													<div>
+														<h4 className="font-bold text-gray-900 mb-2">PRIVACY & SECURITY</h4>
+														<ul className="list-disc list-inside space-y-1 ml-2">
+															<li>Your personal information is encrypted and secure</li>
+															<li>Voting records are stored with blockchain-level security</li>
+															<li>You can choose to hide your name for additional privacy</li>
+															<li>All communication is protected by SSL encryption</li>
+														</ul>
+													</div>
+
+													<div>
+														<h4 className="font-bold text-gray-900 mb-2">TECHNICAL REQUIREMENTS</h4>
+														<ul className="list-disc list-inside space-y-1 ml-2">
+															<li>Use a modern web browser for best experience</li>
+															<li>Ensure stable internet connection during voting</li>
+															<li>Mobile devices are fully supported</li>
+															<li>Do not refresh the page during the voting process</li>
+														</ul>
+													</div>
+
+													<div className="border-t border-gray-200 pt-4 mt-6">
+														<p className="text-xs text-gray-500 italic">
+															By proceeding to view candidates, you acknowledge that you have read, understood, and agree to abide by these election rules and voter guidelines.
+														</p>
+													</div>
+												</div>
+											</div>
+
+											{/* Confirmation Checkbox */}
+											<div className="flex items-start gap-3 p-4 bg-white rounded-xl border border-gray-200">
+												<input
+													type="checkbox"
+													id="terms-checkbox"
+													checked={hasReadTerms}
+													onChange={(e) => setHasReadTerms(e.target.checked)}
+													disabled={!canScrollToCheckbox}
+													className="mt-1 w-4 h-4 text-[#f05a28] bg-gray-100 border-gray-300 rounded focus:ring-[#f05a28] focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
+												/>
+												<label 
+													htmlFor="terms-checkbox" 
+													className={`text-sm font-medium leading-6 cursor-pointer ${!canScrollToCheckbox ? 'text-gray-400' : 'text-gray-700'}`}
+												>
+													{canScrollToCheckbox ? (
+														"I have read and understood the voter information and election rules above"
+													) : (
+														<span className="text-gray-500">Please scroll through all the information above to enable this checkbox</span>
+													)}
+												</label>
 											</div>
 										</div>
 

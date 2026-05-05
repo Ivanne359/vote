@@ -19,6 +19,8 @@ import {
   where,
 } from "firebase/firestore";
 
+const GOOGLE_REDIRECT_PENDING_KEY = "google_sign_in_pending";
+
 export default function VoteLoginPage() {
   const { user, loading, signInWithGoogle, sendVerificationCode, logout } = useAuth();
   const router = useRouter();
@@ -33,6 +35,7 @@ export default function VoteLoginPage() {
   const [googleIdNumber, setGoogleIdNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [googleRedirectPending, setGoogleRedirectPending] = useState(false);
 
   const clearMessages = () => {
     setError(null);
@@ -54,6 +57,93 @@ export default function VoteLoginPage() {
     }
   };
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setGoogleRedirectPending(sessionStorage.getItem(GOOGLE_REDIRECT_PENDING_KEY) === "1");
+  }, []);
+
+  const clearGoogleRedirectPending = () => {
+    if (typeof window === "undefined") return;
+    sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
+    setGoogleRedirectPending(false);
+  };
+
+  const completeGoogleSignInFlow = async (signedEmail: string) => {
+    const currentUser = auth?.currentUser;
+
+    if (!signedEmail || !currentUser?.uid) {
+      throw new Error("Failed to get email from Google account.");
+    }
+
+    if (!db) {
+      throw new Error("Firestore is not initialized.");
+    }
+
+    const normalizedEmail = signedEmail.toLowerCase();
+    const usersRef = collection(db, "users");
+    const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
+    const userSnapshot = await getDocs(userByEmailQuery);
+
+    const resolvedName = currentUser.displayName || "Voter";
+    const resolvedPic = currentUser.photoURL || "";
+
+    if (!userSnapshot.empty) {
+      const existingData = userSnapshot.docs[0].data();
+      const existingDocId = userSnapshot.docs[0].id;
+      const savedStudentId = String(existingData.studentId || "");
+      const savedName = String(existingData.fullName || existingData.name || resolvedName);
+      const savedPic = String(existingData.profilePic || resolvedPic || "");
+
+      if (/^\d{8}$/.test(savedStudentId)) {
+        await setDoc(
+          doc(db, "users", existingDocId),
+          {
+            provider: "google",
+            email: normalizedEmail,
+            fullName: savedName,
+            profilePic: savedPic || null,
+            googleVerifiedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+
+        saveGoogleSession({
+          email: normalizedEmail,
+          fullName: savedName,
+          studentId: savedStudentId,
+          profilePic: savedPic,
+        });
+
+        clearGoogleRedirectPending();
+        router.push("/vote/candidate");
+        return;
+      }
+    }
+
+    await sendVerificationCode(normalizedEmail);
+
+    setPendingGoogleEmail(normalizedEmail);
+    setPendingGoogleUid(currentUser.uid);
+    setPendingGoogleName(resolvedName);
+    setPendingGooglePic(resolvedPic);
+    setShowGoogleIdWizard(false);
+    setShowVerificationModal(true);
+    clearGoogleRedirectPending();
+  };
+
+  useEffect(() => {
+    if (!googleRedirectPending || showVerificationModal || showGoogleIdWizard) {
+      return;
+    }
+
+    const currentUser = auth?.currentUser;
+    if (!currentUser?.email) {
+      return;
+    }
+
+    void completeGoogleSignInFlow(currentUser.email);
+  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal]);
+
   const handleGoogleIdChange = (e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "");
     if (value.length <= 8) {
@@ -66,68 +156,13 @@ export default function VoteLoginPage() {
     clearMessages();
 
     try {
+      clearGoogleRedirectPending();
       const signedEmail = await signInWithGoogle(false);
       if (signedEmail === null) {
-        // Mobile redirect flow started; wait for the next auth state change after redirect.
         return;
       }
 
-      const currentUser = auth?.currentUser;
-      if (!signedEmail || !currentUser?.uid) {
-        throw new Error("Failed to get email from Google account.");
-      }
-
-      if (!db) {
-        throw new Error("Firestore is not initialized.");
-      }
-
-      const normalizedEmail = signedEmail.toLowerCase();
-      const usersRef = collection(db, "users");
-      const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
-      const userSnapshot = await getDocs(userByEmailQuery);
-
-      const resolvedName = currentUser.displayName || "Voter";
-      const resolvedPic = currentUser.photoURL || "";
-
-      if (!userSnapshot.empty) {
-        const existingData = userSnapshot.docs[0].data();
-        const existingDocId = userSnapshot.docs[0].id;
-        const savedStudentId = String(existingData.studentId || "");
-        const savedName = String(existingData.fullName || existingData.name || resolvedName);
-        const savedPic = String(existingData.profilePic || resolvedPic || "");
-
-        if (/^\d{8}$/.test(savedStudentId)) {
-          await setDoc(
-            doc(db, "users", existingDocId),
-            {
-              provider: "google",
-              email: normalizedEmail,
-              fullName: savedName,
-              profilePic: savedPic || null,
-              googleVerifiedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          );
-
-          saveGoogleSession({
-            email: normalizedEmail,
-            fullName: savedName,
-            studentId: savedStudentId,
-            profilePic: savedPic,
-          });
-
-          router.push("/vote/candidate");
-          return;
-        }
-      }
-
-      await sendVerificationCode(normalizedEmail);
-
-      setPendingGoogleEmail(normalizedEmail);
-      setPendingGoogleUid(currentUser.uid);
-      setPendingGoogleName(resolvedName);
-      setPendingGooglePic(resolvedPic);
-      setShowVerificationModal(true);
+      await completeGoogleSignInFlow(signedEmail);
     } catch (err) {
       console.error("Google sign-in error:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to sign in with Google";
@@ -261,6 +296,7 @@ export default function VoteLoginPage() {
       });
 
       setShowGoogleIdWizard(false);
+      clearGoogleRedirectPending();
       router.push("/vote/candidate");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save Student ID";
@@ -269,10 +305,10 @@ export default function VoteLoginPage() {
   };
 
   useEffect(() => {
-    if (!loading && user && !showVerificationModal && !showGoogleIdWizard) {
+    if (!loading && user && !showVerificationModal && !showGoogleIdWizard && !googleRedirectPending) {
       router.push("/vote/candidate");
     }
-  }, [user, loading, router, showVerificationModal, showGoogleIdWizard]);
+  }, [user, loading, router, showVerificationModal, showGoogleIdWizard, googleRedirectPending]);
 
   if (loading) {
     return (
@@ -356,6 +392,7 @@ export default function VoteLoginPage() {
             setPendingGoogleUid("");
             setPendingGoogleName("");
             setPendingGooglePic("");
+            clearGoogleRedirectPending();
           }}
           onResend={async () => {
             if (!pendingGoogleEmail) return;

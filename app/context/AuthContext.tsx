@@ -14,6 +14,8 @@ import {
 } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 
+const GOOGLE_REDIRECT_PENDING_KEY = "google_sign_in_pending";
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -72,6 +74,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const provider = new GoogleAuthProvider();
         provider.addScope('profile');
         provider.addScope('email');
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
+        }
         await setPersistence(auth, browserLocalPersistence);
         await signInWithRedirect(auth, provider);
         return null;
@@ -82,6 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Fallback to redirect flow for browsers that block popup windows.
         // Use local persistence to avoid missing-initial-state errors in restricted browser environments.
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
+        }
         await setPersistence(auth, browserLocalPersistence);
         await signInWithRedirect(auth, googleProvider);
         return null;
@@ -151,6 +159,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) throw new Error("Firebase Auth is not initialized");
     
     try {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(GOOGLE_REDIRECT_PENDING_KEY);
+      }
       await signOut(auth);
     } catch (error) {
       console.error("Logout error:", error);

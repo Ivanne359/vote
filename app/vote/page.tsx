@@ -529,7 +529,7 @@ export default function HomePage() {
       {/* MODAL */}
       <AnimatePresence>
         {showPrivacyModal && (
-          <div className="fixed inset-0 z-[170] flex items-center justify-center p-4 md:p-6">
+          <div className="fixed inset-0 z-[170] flex items-start justify-center overflow-y-auto p-4 md:p-6 sm:items-center">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -542,7 +542,7 @@ export default function HomePage() {
               initial={{ scale: 0.92, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="relative w-full max-w-3xl bg-white rounded-[2.5rem] overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.25)]"
+              className="relative w-full max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto bg-white rounded-[2.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.25)]"
             >
               <div className="h-2 w-full bg-gradient-to-r from-[#f05a28] to-orange-400" />
 

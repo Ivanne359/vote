@@ -61,19 +61,26 @@ export default function VoteLayout({
     void validateAccess();
   }, [user, loading, router]);
 
-  if (loading) {
+  if (loading || !accessChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-orange-500 mx-auto mb-4" />
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-gray-600">Checking access...</p>
         </div>
       </div>
     );
   }
 
-  if (!user || !accessChecked || !canAccess) {
-    return null;
+  if (!user || !canAccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-orange-500 mx-auto mb-4" />
+          <p className="text-gray-600">Redirecting...</p>
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;

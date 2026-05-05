@@ -132,14 +132,18 @@ export default function AuthPage() {
     setGoogleLoading(true);
     try {
       clearMessages();
+      console.log("Starting Google sign-in...");
       const signedEmail = await signInWithGoogle(true);
+      console.log("Signed email:", signedEmail);
       const currentUser = auth?.currentUser;
+      console.log("Current user:", currentUser);
 
       if (!signedEmail || !currentUser?.uid) {
         throw new Error("Failed to get email from Google account.");
       }
 
       const normalizedEmail = signedEmail.toLowerCase();
+      console.log("Normalized email:", normalizedEmail);
 
       if (!db) {
         throw new Error("Firebase is not configured.");
@@ -150,15 +154,19 @@ export default function AuthPage() {
         where("email", "==", normalizedEmail),
         limit(1)
       );
+      console.log("Querying Firestore for user...");
       const userSnapshot = await getDocs(userByEmailQuery);
+      console.log("User snapshot empty?", userSnapshot.empty);
 
       if (!userSnapshot.empty) {
+        console.log("Existing user found");
         const existingData = userSnapshot.docs[0].data();
         const savedStudentId = String(existingData.studentId || "");
         const savedName = String(existingData.fullName || existingData.name || currentUser.displayName || "Voter");
         const savedPic = String(existingData.profilePic || currentUser.photoURL || "");
 
         if (/^\d{8}$/.test(savedStudentId)) {
+          console.log("Valid student ID found, saving session...");
           saveGoogleSession({
             email: normalizedEmail,
             fullName: savedName,
@@ -187,11 +195,13 @@ export default function AuthPage() {
           }
 
           setGoogleLoading(false);
+          console.log("Redirecting to /vote");
           router.push('/vote');
           return;
         }
       }
 
+      console.log("New user, sending verification code...");
       await sendVerificationCode(normalizedEmail);
 
       setPendingGoogleEmail(normalizedEmail);
@@ -199,6 +209,7 @@ export default function AuthPage() {
       setPendingGoogleName(currentUser.displayName || "Voter");
       setPendingGooglePic(currentUser.photoURL || "");
       setShowVerificationModal(true);
+      console.log("Verification modal should be shown");
     } catch (err) {
       console.error("Google sign-in error:", err);
       const firebaseError = err as { code?: string; message?: string };

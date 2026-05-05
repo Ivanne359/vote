@@ -8,6 +8,9 @@ const CODE_TTL_MS = 3 * 60 * 1000; // 3 minutes
 const MAX_VERIFY_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+// In-memory store for verification entries (with email as key for faster lookup)
+const verificationStore: Map<string, VerificationEntry & { storedAt: number }> = new Map();
+
 type VerificationEntry = {
   email: string;
   codeHash: string;
@@ -174,7 +177,13 @@ export async function POST(request: Request) {
         `,
       });
 
-      console.log("[POST] Email sent successfully, returning response with payload");
+      console.log("[POST] Email sent successfully, storing entry and returning response");
+
+      // Store in memory as well for reliable retrieval
+      verificationStore.set(normalizedEmail, {
+        ...verificationEntry,
+        storedAt: Date.now(),
+      });
 
       return NextResponse.json(
         {
@@ -221,11 +230,26 @@ export async function PUT(request: Request) {
     console.log("[PUT] Parsed payload from request:", !!stored);
     
     if (!stored) {
-      const cookieHeader = request.headers.get("cookie");
-      console.log("[PUT] Cookie header:", cookieHeader ? "present" : "missing");
-      const cookies = parseCookies(cookieHeader);
-      stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
-      console.log("[PUT] Parsed payload from cookies:", !!stored);
+      // Check in-memory store first (more reliable)
+      const memoryEntry = verificationStore.get(normalizedEmail);
+      if (memoryEntry && memoryEntry.email === normalizedEmail) {
+        console.log("[PUT] Found entry in memory store");
+        stored = {
+          email: memoryEntry.email,
+          codeHash: memoryEntry.codeHash,
+          salt: memoryEntry.salt,
+          expiresAt: memoryEntry.expiresAt,
+          attempts: memoryEntry.attempts,
+          lockedUntil: memoryEntry.lockedUntil,
+        };
+      } else {
+        // Fall back to cookies
+        const cookieHeader = request.headers.get("cookie");
+        console.log("[PUT] Cookie header:", cookieHeader ? "present" : "missing");
+        const cookies = parseCookies(cookieHeader);
+        stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
+        console.log("[PUT] Parsed payload from cookies:", !!stored);
+      }
     }
 
     if (!stored || stored.email !== normalizedEmail) {

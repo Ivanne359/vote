@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[sendVerificationCode] Sending code to:", email);
       const response = await fetch("/api/auth/send-verification-code", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
@@ -159,7 +159,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log("[sendVerificationCode] Saving payload to localStorage");
         saveVerificationPayload(data.verificationPayload);
       } else {
-        console.warn("[sendVerificationCode] No payload in response");
+        console.error("[sendVerificationCode] Server did not return verification payload");
+        throw new Error("Failed to store verification token. Please try again.");
       }
 
       return true;
@@ -171,14 +172,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const verifyCode = async (email: string, code: string): Promise<boolean> => {
     try {
-      const payload = getVerificationPayload();
+      let payload = getVerificationPayload();
+      if (!payload && typeof window !== "undefined") {
+        const cookies = document.cookie.split("; ").reduce<Record<string, string>>((acc, cookie) => {
+          const [name, ...rest] = cookie.split("=");
+          acc[name] = rest.join("=");
+          return acc;
+        }, {});
+        payload = cookies["cetvote_verification"] || null;
+        console.log("[verifyCode] Fallback payload from cookie exists:", !!payload);
+        if (payload) {
+          saveVerificationPayload(payload);
+        }
+      }
+
       console.log("[verifyCode] Email:", email);
       console.log("[verifyCode] Code:", code);
       console.log("[verifyCode] Payload exists:", !!payload);
-      
+
       const response = await fetch("/api/auth/send-verification-code", {
         method: "PUT",
-        credentials: "same-origin",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email,

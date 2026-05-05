@@ -4,6 +4,8 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import fs from "fs";
 import path from "path";
 
+export const runtime = "nodejs";
+
 const CODE_TTL_MS = 3 * 60 * 1000; // 3 minutes
 const RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
 const MAX_VERIFY_ATTEMPTS = 5;
@@ -41,10 +43,6 @@ const saveVerificationCodesToDisk = (codes: Map<string, VerificationEntry>) => {
   } catch (error) {
     console.error("Failed to save verification code store:", error);
   }
-};
-
-const generateVerificationCode = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 type VerificationEntry = {

@@ -253,9 +253,10 @@ export default function AuthPage() {
             );
           }
 
+          setSuccessMsg("Existing account found. Redirecting to voting page...");
           setGoogleLoading(false);
           console.log("Redirecting to /vote");
-          router.push('/vote');
+          await router.push('/vote');
           return;
         }
       }
@@ -264,6 +265,7 @@ export default function AuthPage() {
       try {
         await sendVerificationCode(normalizedEmail);
         console.log("Verification code sent successfully");
+        setSuccessMsg("Verification code sent. Please check your email.");
       } catch (sendError) {
         console.error("Failed to send verification code:", sendError);
         throw sendError;

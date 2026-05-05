@@ -6,10 +6,6 @@ import { motion } from "framer-motion";
 import Image from "next/image";
 import { Lock, Mail, AlertCircle, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
-const ADMIN_EMAIL = "admin@hcdc.edu.ph";
-const ADMIN_PASSWORD = "123";
-const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-
 export default function AdminLogin() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -24,22 +20,25 @@ export default function AdminLogin() {
     setLoading(true);
 
     try {
-      if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
-        setError("Invalid admin credentials.");
-        setLoading(false);
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        setError(data?.error ?? "Invalid admin credentials.");
         return;
       }
 
-      // Store admin session
-      localStorage.setItem("adminSession", JSON.stringify({
-        email,
-        loginTime: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS).toISOString(),
-      }));
-
-      router.push("/admin/dashboard");
-    } catch (err) {
-      setError("An error occurred during login.");
+      router.replace("/admin/dashboard");
+      router.refresh();
+    } catch {
+      setError("Unable to reach the authentication service.");
     } finally {
       setLoading(false);
     }
@@ -100,6 +99,8 @@ export default function AdminLogin() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@hcdc.edu.ph"
+                  autoComplete="username"
+                  spellCheck={false}
                   className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl text-gray-900 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#f05a28]/50 focus:border-transparent transition-all"
                 />
               </div>
@@ -116,6 +117,7 @@ export default function AdminLogin() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  autoComplete="current-password"
                   className="w-full pl-12 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl text-gray-900 placeholder:text-gray-400 font-medium focus:outline-none focus:ring-2 focus:ring-[#f05a28]/50 focus:border-transparent transition-all"
                 />
                 <button

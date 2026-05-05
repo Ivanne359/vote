@@ -23,21 +23,12 @@ const ADMIN_MENU = [
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
 ];
 
-export default function AdminNavbar() {
+export default function AdminNavbar({ adminEmail }: { adminEmail: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
-  const [adminEmail, setAdminEmail] = useState("");
   const [settings, setSettings] = useState<ElectionSettings | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  useEffect(() => {
-    const adminSession = localStorage.getItem("adminSession");
-    if (adminSession) {
-      const session = JSON.parse(adminSession);
-      setAdminEmail(session.email);
-    }
-  }, []);
 
   useEffect(() => {
     const unsub = subscribeElectionSettings((settings) => {
@@ -56,9 +47,12 @@ export default function AdminNavbar() {
   const end = electionWindow.end;
   const isVotingOpen = Boolean(start && end && currentTime >= start && currentTime <= end);
 
-  const handleLogout = () => {
-    localStorage.removeItem("adminSession");
-    router.push("/admin/login");
+  const handleLogout = async () => {
+    await fetch("/api/admin/logout", {
+      method: "POST",
+    });
+    router.replace("/admin/login");
+    router.refresh();
   };
 
   return (
@@ -119,7 +113,7 @@ export default function AdminNavbar() {
 
           <div className="hidden sm:flex items-center gap-2 rounded-full border border-orange-100 bg-[#fff7f2] px-3 py-1.5 shadow-sm">
             <span className="text-xs font-bold text-gray-700">
-              {adminEmail.split("@")[0]}
+              {adminEmail ? adminEmail.split("@")[0] : "Admin"}
             </span>
           </div>
 

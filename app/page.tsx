@@ -9,9 +9,12 @@ import { Lock, User, Loader2, ArrowRight, AlertCircle, Mail, IdCard, CheckCircle
 import { Poppins } from 'next/font/google';
 
 import { auth, db } from '@/lib/firebase';
+import { useAuth } from '@/app/context/AuthContext';
+import VerificationCodeModal from '@/app/components/VerificationCodeModal';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signOut,
 } from 'firebase/auth';
 import {
   doc,
@@ -20,6 +23,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   limit,
 } from 'firebase/firestore';
 
@@ -30,12 +34,22 @@ const poppins = Poppins({
 
 export default function AuthPage() {
   const router = useRouter();
+  const { signInWithGoogle, sendVerificationCode } = useAuth();
 
   const [isLogin, setIsLogin] = useState(true);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [shake, setShake] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [pendingGoogleEmail, setPendingGoogleEmail] = useState("");
+  const [pendingGoogleUid, setPendingGoogleUid] = useState("");
+  const [pendingGoogleName, setPendingGoogleName] = useState("");
+  const [pendingGooglePic, setPendingGooglePic] = useState("");
+  const [showGoogleIdWizard, setShowGoogleIdWizard] = useState(false);
+  const [googleIdNumber, setGoogleIdNumber] = useState("");
+  const [googleIdLoading, setGoogleIdLoading] = useState(false);
 
   const [studentId, setStudentId] = useState("");
   const [fullName, setFullName] = useState("");
@@ -87,6 +101,243 @@ export default function AuthPage() {
     setError("");
     setSuccessMsg("");
     setShake(false);
+  };
+
+  const saveGoogleSession = (payload: {
+    email: string;
+    fullName: string;
+    studentId: string;
+    profilePic?: string;
+  }) => {
+    localStorage.setItem("voterName", payload.fullName);
+    localStorage.setItem("voterId", payload.studentId);
+    localStorage.setItem("voterEmail", payload.email.toLowerCase());
+    if (payload.profilePic) {
+      localStorage.setItem("voterPic", payload.profilePic);
+    }
+  };
+
+  const handleGoogleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, "");
+    if (value.length <= 8) {
+      setGoogleIdNumber(value);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (!isLogin) {
+      return;
+    }
+
+    setGoogleLoading(true);
+    try {
+      clearMessages();
+      const signedEmail = await signInWithGoogle(true);
+      const currentUser = auth?.currentUser;
+
+      if (!signedEmail || !currentUser?.uid) {
+        throw new Error("Failed to get email from Google account.");
+      }
+
+      const normalizedEmail = signedEmail.toLowerCase();
+
+      if (!db) {
+        throw new Error("Firebase is not configured.");
+      }
+
+      const userByEmailQuery = query(
+        collection(db, "users"),
+        where("email", "==", normalizedEmail),
+        limit(1)
+      );
+      const userSnapshot = await getDocs(userByEmailQuery);
+
+      if (!userSnapshot.empty) {
+        const existingData = userSnapshot.docs[0].data();
+        const savedStudentId = String(existingData.studentId || "");
+        const savedName = String(existingData.fullName || existingData.name || currentUser.displayName || "Voter");
+        const savedPic = String(existingData.profilePic || currentUser.photoURL || "");
+
+        if (/^\d{8}$/.test(savedStudentId)) {
+          saveGoogleSession({
+            email: normalizedEmail,
+            fullName: savedName,
+            studentId: savedStudentId,
+            profilePic: savedPic,
+          });
+
+          if (!existingData.provider) {
+            await setDoc(
+              doc(db, "users", userSnapshot.docs[0].id),
+              {
+                provider: "google",
+                email: normalizedEmail,
+                fullName: savedName,
+                profilePic: savedPic || null,
+                googleVerifiedAt: new Date().toISOString(),
+              },
+              { merge: true }
+            );
+          } else {
+            await setDoc(
+              doc(db, "users", userSnapshot.docs[0].id),
+              { googleVerifiedAt: new Date().toISOString() },
+              { merge: true }
+            );
+          }
+
+          setGoogleLoading(false);
+          router.push('/vote');
+          return;
+        }
+      }
+
+      await sendVerificationCode(normalizedEmail);
+
+      setPendingGoogleEmail(normalizedEmail);
+      setPendingGoogleUid(currentUser.uid);
+      setPendingGoogleName(currentUser.displayName || "Voter");
+      setPendingGooglePic(currentUser.photoURL || "");
+      setShowVerificationModal(true);
+    } catch (err) {
+      const firebaseError = err as { code?: string; message?: string };
+
+      if (firebaseError?.code === "auth/popup-closed-by-user") {
+        setGoogleLoading(false);
+        setError("Google sign-in was canceled.");
+        return;
+      }
+
+      if (auth?.currentUser) {
+        await signOut(auth);
+      }
+      const errorMessage = err instanceof Error ? err.message : "Failed to sign in with Google";
+      triggerError(errorMessage);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleVerificationComplete = async () => {
+    try {
+      if (!db || !auth?.currentUser) {
+        throw new Error("Firebase is not configured.");
+      }
+
+      const normalizedEmail = pendingGoogleEmail.toLowerCase();
+      const usersRef = collection(db, "users");
+      const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
+      const userSnapshot = await getDocs(userByEmailQuery);
+
+      let docId = auth.currentUser.uid;
+      let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
+      let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
+      let resolvedStudentId = "";
+
+      if (userSnapshot.empty) {
+        await setDoc(doc(db, "users", docId), {
+          uid: docId,
+          email: normalizedEmail,
+          fullName: resolvedName,
+          profilePic: resolvedPic || null,
+          createdAt: new Date().toISOString(),
+          provider: "google",
+          googleVerifiedAt: new Date().toISOString(),
+        }, { merge: true });
+      } else {
+        const existingDoc = userSnapshot.docs[0];
+        const existingData = existingDoc.data();
+        docId = existingDoc.id;
+        resolvedName = (existingData.fullName || existingData.name || resolvedName) as string;
+        resolvedPic = (existingData.profilePic || resolvedPic || "") as string;
+        resolvedStudentId = (existingData.studentId || "") as string;
+
+        if (!existingData.uid) {
+          await setDoc(doc(db, "users", docId), { uid: docId }, { merge: true });
+        }
+      }
+
+      setShowVerificationModal(false);
+      setPendingGoogleUid(docId);
+      setPendingGoogleName(resolvedName);
+      setPendingGooglePic(resolvedPic);
+
+      if (resolvedStudentId && resolvedStudentId.length === 8) {
+        saveGoogleSession({
+          email: normalizedEmail,
+          fullName: resolvedName,
+          studentId: resolvedStudentId,
+          profilePic: resolvedPic,
+        });
+        router.push('/vote');
+        return;
+      }
+
+      setGoogleIdNumber("");
+      setShowGoogleIdWizard(true);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to continue Google login";
+      triggerError(errorMessage);
+      setShowVerificationModal(false);
+    }
+  };
+
+  const handleGoogleIdWizardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (googleIdNumber.length !== 8) {
+      setError("Student ID must be exactly 8 digits.");
+      return;
+    }
+
+    try {
+      setGoogleIdLoading(true);
+      if (!db || !pendingGoogleUid) {
+        throw new Error("Missing Google account details.");
+      }
+
+      const usersRef = collection(db, "users");
+      const studentIdQuery = query(usersRef, where("studentId", "==", googleIdNumber), limit(1));
+      const existingStudentId = await getDocs(studentIdQuery);
+      const takenByAnother = existingStudentId.docs.some((item) => item.id !== pendingGoogleUid);
+
+      if (takenByAnother) {
+        throw new Error("Student ID is already registered.");
+      }
+
+      const userDocRef = doc(db, "users", pendingGoogleUid);
+      const userDocSnapshot = await getDoc(userDocRef);
+      const currentData = userDocSnapshot.exists() ? userDocSnapshot.data() : {};
+
+      const finalName = (currentData.fullName || currentData.name || pendingGoogleName || "Voter") as string;
+      const finalPic = (currentData.profilePic || pendingGooglePic || "") as string;
+
+      await setDoc(userDocRef, {
+        uid: pendingGoogleUid,
+        email: pendingGoogleEmail.toLowerCase(),
+        fullName: finalName,
+        profilePic: finalPic || null,
+        studentId: googleIdNumber,
+        provider: "google",
+        googleVerifiedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      saveGoogleSession({
+        email: pendingGoogleEmail,
+        fullName: finalName,
+        studentId: googleIdNumber,
+        profilePic: finalPic,
+      });
+
+      setShowGoogleIdWizard(false);
+      router.push('/vote');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to save Student ID";
+      setError(errorMessage);
+    } finally {
+      setGoogleIdLoading(false);
+    }
   };
 
   const getFirebaseErrorMessage = (code?: string) => {
@@ -168,7 +419,6 @@ export default function AuthPage() {
         const savedProfilePic = (userData.profilePic || null) as string | null;
 
         await signInWithEmailAndPassword(auth, savedEmail, password);
-
         localStorage.setItem("voterName", savedName);
         localStorage.setItem("voterId", savedStudentId);
         localStorage.setItem("voterEmail", savedEmail);
@@ -242,6 +492,7 @@ export default function AuthPage() {
             <motion.div layout transition={{ type: "spring", stiffness: 300, damping: 30 }}>
               <Image src="/cet.png" alt="CET Logo" width={90} height={90} className="relative mx-auto drop-shadow-xl mb-4 w-[100px] h-[100px] sm:w-[110px] sm:h-[110px]" priority />
             </motion.div>
+
             <motion.h1 layout className="text-3xl sm:text-4xl font-[900] text-gray-900 tracking-tighter italic">
               CET<span className="text-[#f05a28] ml-1">VOTE</span>
             </motion.h1>
@@ -381,6 +632,58 @@ export default function AuthPage() {
               </div>
             </button>
 
+            {isLogin && (
+              <>
+                <div className="mt-6 relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-3 bg-white text-gray-500 font-medium">OR</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={googleLoading}
+                  className="w-full mt-6 px-6 py-4 bg-white border-2 border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 hover:border-[#f05a28] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-sm active:scale-[0.98]"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      fill="#34A853"
+                    />
+                    <path
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      fill="#FBBC05"
+                    />
+                    <path
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      fill="#EA4335"
+                    />
+                  </svg>
+                  {googleLoading ? (
+                    <>
+                      <Loader2 className="animate-spin" size={18} />
+                      <span>Signing in...</span>
+                    </>
+                  ) : (
+                    <span className="text-sm tracking-tight uppercase font-black">Sign in with Google</span>
+                  )}
+                </button>
+              </>
+            )}
+
           </form>
 
           <div className="mt-8 text-center">
@@ -390,6 +693,9 @@ export default function AuthPage() {
                 setError("");
                 setSuccessMsg("");
                 setPassword("");
+                setGoogleLoading(false);
+                setShowVerificationModal(false);
+                setShowGoogleIdWizard(false);
               }}
               className="text-xs font-bold text-gray-500 hover:text-[#f05a28] transition-colors group"
             >
@@ -401,6 +707,69 @@ export default function AuthPage() {
           </div>
         </div>
       </motion.div>
+
+      {showVerificationModal && pendingGoogleEmail && (
+        <VerificationCodeModal
+          email={pendingGoogleEmail}
+          onVerified={handleGoogleVerificationComplete}
+          onCancel={async () => {
+            if (auth?.currentUser) {
+              await signOut(auth);
+            }
+            setShowVerificationModal(false);
+            setPendingGoogleEmail("");
+            setPendingGoogleUid("");
+          }}
+          onResend={async () => {
+            if (!pendingGoogleEmail) {
+              return;
+            }
+            await sendVerificationCode(pendingGoogleEmail);
+          }}
+        />
+      )}
+
+      {showGoogleIdWizard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-gray-900">Complete Your Profile</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Enter your 8-digit Student ID to finish Google sign-in.
+            </p>
+
+            <form onSubmit={handleGoogleIdWizardSubmit} className="mt-5 space-y-4">
+              <div>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-500">
+                  Student ID
+                </label>
+                <input
+                  type="text"
+                  value={googleIdNumber}
+                  onChange={handleGoogleIdChange}
+                  maxLength={8}
+                  placeholder="598XXXXX"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono text-base text-gray-800 outline-none transition-all focus:border-[#f05a28] focus:ring-4 focus:ring-[#f05a28]/10"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={googleIdLoading || googleIdNumber.length !== 8}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#111] px-4 py-3 font-black uppercase tracking-wide text-white transition-colors hover:bg-[#f05a28] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {googleIdLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Continue"
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       
     </div>

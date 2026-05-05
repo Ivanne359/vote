@@ -27,13 +27,17 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-storage-bucket
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
 NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
+
+ADMIN_EMAIL=your-admin-email
+ADMIN_PASSWORD=your-admin-password
+ADMIN_SESSION_SECRET=generate-a-long-random-secret
 ```
 
 ### Vercel Deployment
 
 1. Go to your Vercel project settings
 2. Navigate to **Settings > Environment Variables**
-3. Add all Firebase environment variables from above
+3. Add all Firebase environment variables and the admin auth variables from above
 4. Redeploy your project
 
 ## Getting Started

@@ -147,8 +147,10 @@ export default function CandidatesPage() {
 			}
 		}
 
-		if (storedStep === "ballot") {
+		if (storedStep === "ballot" && storedSection && storedSection.trim()) {
 			setStep("ballot");
+		} else {
+			setStep("form");
 		}
 	}, []);
 
@@ -768,7 +770,7 @@ export default function CandidatesPage() {
 														Logged-in voter
 													</p>
 													<p className="text-sm text-gray-500 leading-6 max-w-2xl">
-														Your account details are loaded from your current session. You can hide your name for privacy, but your ID stays tied to the verified voter record.
+														Your voter information is ready for this session. You can hide your name for privacy, but your ID stays tied to your verified voter record.
 													</p>
 												</div>
 
@@ -796,7 +798,7 @@ export default function CandidatesPage() {
 														{isLoadingIdentity ? "Loading..." : formData.hideName ? "Anonymous Voter" : formData.name}
 													</p>
 													<p className="mt-1 text-sm text-gray-500 font-medium">
-														Prefilled from your login session
+														Loaded from your voter record
 													</p>
 												</div>
 
@@ -808,7 +810,7 @@ export default function CandidatesPage() {
 														{isLoadingIdentity ? "Loading..." : formData.idNumber}
 													</p>
 													<p className="mt-1 text-sm text-gray-500 font-medium">
-														Linked to the authenticated session
+														Verified voter identity
 													</p>
 												</div>
 											</div>

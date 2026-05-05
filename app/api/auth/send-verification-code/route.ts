@@ -83,10 +83,10 @@ export async function POST(request: Request) {
 
     console.log("[POST] Received verification request for:", normalizedEmail);
 
-    if (!normalizedEmail || !normalizedEmail.endsWith("@hcdc.edu.ph")) {
-      console.log("[POST] Invalid email domain");
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      console.log("[POST] Invalid email address");
       return NextResponse.json(
-        { error: "Only @hcdc.edu.ph email addresses are allowed" },
+        { error: "Invalid email address" },
         { status: 400 }
       );
     }

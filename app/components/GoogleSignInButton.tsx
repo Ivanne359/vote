@@ -4,22 +4,34 @@ import { useState } from "react";
 import { useAuth } from "@/app/context/AuthContext";
 import { Loader2 } from "lucide-react";
 
-export default function GoogleSignInButton() {
+interface GoogleSignInButtonProps {
+  onClick?: () => Promise<void> | void;
+  loading?: boolean;
+}
+
+export default function GoogleSignInButton({ onClick, loading = false }: GoogleSignInButtonProps) {
   const { signInWithGoogle } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const [internalLoading, setInternalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isLoading = loading || internalLoading;
+
   const handleSignIn = async () => {
-    setLoading(true);
+    setInternalLoading(true);
     setError(null);
+
     try {
-      await signInWithGoogle();
+      if (onClick) {
+        await onClick();
+      } else {
+        await signInWithGoogle();
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to sign in";
       setError(errorMessage);
       console.error("Sign-in error:", err);
     } finally {
-      setLoading(false);
+      setInternalLoading(false);
     }
   };
 
@@ -27,10 +39,10 @@ export default function GoogleSignInButton() {
     <div className="w-full">
       <button
         onClick={handleSignIn}
-        disabled={loading}
+        disabled={isLoading}
         className="w-full px-6 py-3 bg-white border-2 border-blue-500 text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
-        {loading ? (
+        {isLoading ? (
           <>
             <Loader2 className="w-5 h-5 animate-spin" />
             Signing in...

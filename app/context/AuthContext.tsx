@@ -1,20 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, getAdditionalUserInfo, GoogleAuthProvider } from "firebase/auth";
+import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
-
-interface GoogleSignInResult {
-  email: string;
-  uid: string;
-  displayName?: string | null;
-  photoURL?: string | null;
-}
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithGoogle: (validateDomain?: boolean) => Promise<GoogleSignInResult | null>;
+  signInWithGoogle: (validateDomain?: boolean) => Promise<string | null>;
   logout: () => Promise<void>;
   userEmail: string | null;
   verifyCode: (email: string, code: string) => Promise<boolean>;
@@ -47,16 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!auth) return;
 
       try {
-        const result = await getRedirectResult(auth);
-        if (result) {
-          const email = result.user.email;
-          // Validate email domain for redirect flow
-          if (email && !email.endsWith("@hcdc.edu.ph")) {
-            await signOut(auth);
-            // You might want to show an error message to the user here
-            console.error("Only @hcdc.edu.ph email addresses are allowed");
-          }
-        }
+        await getRedirectResult(auth);
       } catch (error) {
         console.error("Redirect result error:", error);
         // Handle redirect errors (e.g., user cancelled, network issues)
@@ -66,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     handleRedirectResult();
   }, []);
 
-  const signInWithGoogle = async (validateDomain: boolean = true): Promise<GoogleSignInResult | null> => {
+  const signInWithGoogle = async (validateDomain: boolean = false): Promise<string | null> => {
     if (!auth) throw new Error("Firebase Auth is not initialized");
 
     try {
@@ -90,136 +74,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         result = await signInWithPopup(auth, googleProvider);
       }
 
-      console.log("[AuthContext] Google popup result:", result);
+      const email = result.user.email;
+      if (!email) {
+        await signOut(auth);
+        throw new Error("Failed to get email from Google account.");
+      }
 
-      const additionalInfo = getAdditionalUserInfo(result);
-      const email =
-        result?.user?.email ||
-        (additionalInfo?.profile as { email?: string } | null)?.email ||
-        null;
-
-      // Validate email domain
-      if (validateDomain && (!email || !email.endsWith("@hcdc.edu.ph"))) {
+      if (validateDomain && !email.endsWith("@hcdc.edu.ph")) {
         await signOut(auth);
         throw new Error("Only @hcdc.edu.ph email addresses are allowed");
       }
 
-      if (!email) {
-        await signOut(auth);
-        throw new Error("Failed to obtain email from Google account.");
-      }
-
-      return {
-        email,
-        uid: result.user.uid,
-        displayName: result.user.displayName,
-        photoURL: result.user.photoURL,
-      };
+      return email;
     } catch (error) {
       console.error("Google sign-in error:", error);
       throw error;
     }
   };
 
-  const storageKey = "cetvote_verification_payload";
-
-  const saveVerificationPayload = (payload: string) => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(storageKey, payload);
-    }
-  };
-
-  const clearVerificationPayload = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(storageKey);
-    }
-  };
-
-  const getVerificationPayload = (): string | null => {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem(storageKey);
-  };
-
   const sendVerificationCode = async (email: string): Promise<boolean> => {
     try {
-      console.log("[sendVerificationCode] Sending code to:", email);
       const response = await fetch("/api/auth/send-verification-code", {
         method: "POST",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
 
-      const data = await response.json();
-      console.log("[sendVerificationCode] Response status:", response.status);
-      console.log("[sendVerificationCode] Response data:", data);
-      
       if (!response.ok) {
+        const data = await response.json();
         throw new Error(data.error || "Failed to send verification code");
-      }
-
-      if (data.verificationPayload) {
-        console.log("[sendVerificationCode] Saving payload to localStorage");
-        saveVerificationPayload(data.verificationPayload);
-      } else {
-        console.error("[sendVerificationCode] Server failed to return verification payload");
-        throw new Error("Verification token missing from server response. Please retry.");
       }
 
       return true;
     } catch (error) {
-      console.error("[sendVerificationCode] Error:", error);
+      console.error("Error sending verification code:", error);
       throw error;
     }
   };
 
   const verifyCode = async (email: string, code: string): Promise<boolean> => {
     try {
-      let payload = getVerificationPayload();
-      if (!payload && typeof window !== "undefined") {
-        const cookies = document.cookie.split("; ").reduce<Record<string, string>>((acc, cookie) => {
-          const [name, ...rest] = cookie.split("=");
-          acc[name] = rest.join("=");
-          return acc;
-        }, {});
-        payload = cookies["cetvote_verification"] || null;
-        console.log("[verifyCode] Fallback payload from cookie exists:", !!payload);
-        if (payload) {
-          saveVerificationPayload(payload);
-        }
-      }
-
-      console.log("[verifyCode] Email:", email);
-      console.log("[verifyCode] Code:", code);
-      console.log("[verifyCode] Payload exists:", !!payload);
-      
       const response = await fetch("/api/auth/send-verification-code", {
         method: "PUT",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          code,
-          verificationPayload: payload,
-        }),
+        body: JSON.stringify({ email, code }),
       });
 
-      const data = await response.json();
-      console.log("[verifyCode] Response status:", response.status);
-      console.log("[verifyCode] Response data:", data);
-      
       if (!response.ok) {
+        const data = await response.json();
         throw new Error(data.error || "Failed to verify code");
       }
 
-      clearVerificationPayload();
       return true;
     } catch (error) {
-      console.error("[verifyCode] Error:", error);
+      console.error("Error verifying code:", error);
       throw error;
     }
   };
-
 
   const logout = async () => {
     if (!auth) throw new Error("Firebase Auth is not initialized");

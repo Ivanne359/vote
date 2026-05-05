@@ -51,53 +51,6 @@ export default function AuthPage() {
   const [googleIdNumber, setGoogleIdNumber] = useState("");
   const [googleIdLoading, setGoogleIdLoading] = useState(false);
 
-  // Handle mobile redirect sign-in completion
-  useEffect(() => {
-    const handleRedirectSignIn = async () => {
-      if (!auth?.currentUser || !db || googleLoading) return;
-
-      try {
-        const currentUser = auth.currentUser;
-        const email = currentUser.email;
-        if (!email) return;
-
-        const normalizedEmail = email.toLowerCase();
-
-        // Check if this is a new sign-in that needs verification
-        const userByEmailQuery = query(
-          collection(db, "users"),
-          where("email", "==", normalizedEmail),
-          limit(1)
-        );
-
-        const userSnapshot = await getDocs(userByEmailQuery);
-
-        if (userSnapshot.empty) {
-          // New user - trigger verification flow
-          console.log("New user from redirect, sending verification code...");
-          await sendVerificationCode(normalizedEmail);
-
-          setPendingGoogleEmail(normalizedEmail);
-          setPendingGoogleUid(currentUser.uid);
-          setPendingGoogleName(currentUser.displayName || "Voter");
-          setPendingGooglePic(currentUser.photoURL || "");
-          setShowVerificationModal(true);
-          setGoogleLoading(false);
-        }
-        // If user exists, they're already verified and should be redirected
-        // This is handled by the existing auth state listener
-      } catch (error) {
-        console.error("Error handling redirect sign-in:", error);
-        setGoogleLoading(false);
-      }
-    };
-
-    // Only run if we have a current user and we're in login mode
-    if (isLogin && auth?.currentUser && !showVerificationModal && !showGoogleIdWizard) {
-      handleRedirectSignIn();
-    }
-  }, [auth?.currentUser, isLogin, showVerificationModal, showGoogleIdWizard, sendVerificationCode, googleLoading]);
-
   const [studentId, setStudentId] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -180,24 +133,12 @@ export default function AuthPage() {
     try {
       clearMessages();
       console.log("Starting Google sign-in...");
-      const signedUser = await signInWithGoogle(true);
-      console.log("Signed user:", signedUser);
-
-      // For mobile redirect flow, signedUser will be null
-      // The verification flow will be handled by the useEffect above
-      if (signedUser === null) {
-        // Mobile redirect initiated, loading will be set to false by the useEffect
-        return;
-      }
-
-      const signedEmail = signedUser.email;
-      const signedUid = signedUser.uid;
-      const signedDisplayName = signedUser.displayName || "Voter";
-      const signedPhotoURL = signedUser.photoURL || "";
-
+      const signedEmail = await signInWithGoogle(false);
       console.log("Signed email:", signedEmail);
+      const currentUser = auth?.currentUser;
+      console.log("Current user:", currentUser);
 
-      if (!signedEmail || !signedUid) {
+      if (!signedEmail || !currentUser?.uid) {
         throw new Error("Failed to get email from Google account.");
       }
 
@@ -221,8 +162,8 @@ export default function AuthPage() {
         console.log("Existing user found");
         const existingData = userSnapshot.docs[0].data();
         const savedStudentId = String(existingData.studentId || "");
-        const savedName = String(existingData.fullName || existingData.name || signedDisplayName);
-        const savedPic = String(existingData.profilePic || signedPhotoURL);
+        const savedName = String(existingData.fullName || existingData.name || currentUser.displayName || "Voter");
+        const savedPic = String(existingData.profilePic || currentUser.photoURL || "");
 
         if (/^\d{8}$/.test(savedStudentId)) {
           console.log("Valid student ID found, saving session...");
@@ -253,28 +194,20 @@ export default function AuthPage() {
             );
           }
 
-          setSuccessMsg("Existing account found. Redirecting to voting page...");
           setGoogleLoading(false);
           console.log("Redirecting to /vote");
-          await router.push('/vote');
+          router.push('/vote');
           return;
         }
       }
 
       console.log("New user, sending verification code...");
-      try {
-        await sendVerificationCode(normalizedEmail);
-        console.log("Verification code sent successfully");
-        setSuccessMsg("Verification code sent. Please check your email.");
-      } catch (sendError) {
-        console.error("Failed to send verification code:", sendError);
-        throw sendError;
-      }
+      await sendVerificationCode(normalizedEmail);
 
       setPendingGoogleEmail(normalizedEmail);
-      setPendingGoogleUid(signedUid);
-      setPendingGoogleName(signedDisplayName);
-      setPendingGooglePic(signedPhotoURL);
+      setPendingGoogleUid(currentUser.uid);
+      setPendingGoogleName(currentUser.displayName || "Voter");
+      setPendingGooglePic(currentUser.photoURL || "");
       setShowVerificationModal(true);
       console.log("Verification modal should be shown");
     } catch (err) {
@@ -300,7 +233,7 @@ export default function AuthPage() {
 
   const handleGoogleVerificationComplete = async () => {
     try {
-      if (!db) {
+      if (!db || !auth?.currentUser) {
         throw new Error("Firebase is not configured.");
       }
 
@@ -309,14 +242,9 @@ export default function AuthPage() {
       const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
       const userSnapshot = await getDocs(userByEmailQuery);
 
-      const resolvedUid = pendingGoogleUid || auth?.currentUser?.uid;
-      if (!resolvedUid) {
-        throw new Error("Unable to identify signed-in user.");
-      }
-
-      let docId = resolvedUid;
-      let resolvedName = pendingGoogleName || auth?.currentUser?.displayName || "Voter";
-      let resolvedPic = pendingGooglePic || auth?.currentUser?.photoURL || "";
+      let docId = auth.currentUser.uid;
+      let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
+      let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
       let resolvedStudentId = "";
 
       if (userSnapshot.empty) {
@@ -800,9 +728,6 @@ export default function AuthPage() {
           onCancel={async () => {
             if (auth?.currentUser) {
               await signOut(auth);
-            }
-            if (typeof window !== "undefined") {
-              localStorage.removeItem("cetvote_verification_payload");
             }
             setShowVerificationModal(false);
             setPendingGoogleEmail("");

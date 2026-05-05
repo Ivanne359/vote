@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import AdminNavbar from "./components/AdminNavbar";
 import { ADMIN_SESSION_COOKIE, verifyAdminSessionToken } from "@/lib/adminSession";
@@ -11,6 +11,18 @@ export default async function AdminLayout({
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   const session = verifyAdminSessionToken(sessionToken);
+
+  const headersList = await headers();
+  const pathname =
+    headersList.get("x-invoke-pathname") ||
+    headersList.get("x-nextjs-pathname") ||
+    headersList.get("x-original-url") ||
+    "";
+  const isLoginRoute = typeof pathname === "string" && pathname.startsWith("/admin/login");
+
+  if (!session && isLoginRoute) {
+    return <>{children}</>;
+  }
 
   if (!session) {
     redirect("/admin/login");

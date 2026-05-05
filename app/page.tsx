@@ -298,7 +298,7 @@ export default function AuthPage() {
 
   const handleGoogleVerificationComplete = async () => {
     try {
-      if (!db || !auth?.currentUser) {
+      if (!db) {
         throw new Error("Firebase is not configured.");
       }
 
@@ -307,9 +307,14 @@ export default function AuthPage() {
       const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
       const userSnapshot = await getDocs(userByEmailQuery);
 
-      let docId = auth.currentUser.uid;
-      let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
-      let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
+      const resolvedUid = pendingGoogleUid || auth?.currentUser?.uid;
+      if (!resolvedUid) {
+        throw new Error("Unable to identify signed-in user.");
+      }
+
+      let docId = resolvedUid;
+      let resolvedName = pendingGoogleName || auth?.currentUser?.displayName || "Voter";
+      let resolvedPic = pendingGooglePic || auth?.currentUser?.photoURL || "";
       let resolvedStudentId = "";
 
       if (userSnapshot.empty) {

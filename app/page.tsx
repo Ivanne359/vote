@@ -257,7 +257,13 @@ export default function AuthPage() {
       }
 
       console.log("New user, sending verification code...");
-      await sendVerificationCode(normalizedEmail);
+      try {
+        await sendVerificationCode(normalizedEmail);
+        console.log("Verification code sent successfully");
+      } catch (sendError) {
+        console.error("Failed to send verification code:", sendError);
+        throw sendError;
+      }
 
       setPendingGoogleEmail(normalizedEmail);
       setPendingGoogleUid(currentUser.uid);

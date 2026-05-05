@@ -119,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const sendVerificationCode = async (email: string): Promise<boolean> => {
     try {
+      console.log("[sendVerificationCode] Sending code to:", email);
       const response = await fetch("/api/auth/send-verification-code", {
         method: "POST",
         credentials: "same-origin",
@@ -127,23 +128,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       const data = await response.json();
+      console.log("[sendVerificationCode] Response status:", response.status);
+      console.log("[sendVerificationCode] Response data:", data);
+      
       if (!response.ok) {
         throw new Error(data.error || "Failed to send verification code");
       }
 
       if (data.verificationPayload) {
+        console.log("[sendVerificationCode] Saving payload to localStorage");
         saveVerificationPayload(data.verificationPayload);
+      } else {
+        console.warn("[sendVerificationCode] No payload in response");
       }
 
       return true;
     } catch (error) {
-      console.error("Error sending verification code:", error);
+      console.error("[sendVerificationCode] Error:", error);
       throw error;
     }
   };
 
   const verifyCode = async (email: string, code: string): Promise<boolean> => {
     try {
+      const payload = getVerificationPayload();
+      console.log("[verifyCode] Email:", email);
+      console.log("[verifyCode] Code:", code);
+      console.log("[verifyCode] Payload exists:", !!payload);
+      
       const response = await fetch("/api/auth/send-verification-code", {
         method: "PUT",
         credentials: "same-origin",
@@ -151,11 +163,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           email,
           code,
-          verificationPayload: getVerificationPayload(),
+          verificationPayload: payload,
         }),
       });
 
       const data = await response.json();
+      console.log("[verifyCode] Response status:", response.status);
+      console.log("[verifyCode] Response data:", data);
+      
       if (!response.ok) {
         throw new Error(data.error || "Failed to verify code");
       }
@@ -163,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearVerificationPayload();
       return true;
     } catch (error) {
-      console.error("Error verifying code:", error);
+      console.error("[verifyCode] Error:", error);
       throw error;
     }
   };

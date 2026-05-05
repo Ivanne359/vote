@@ -78,7 +78,10 @@ export async function POST(request: Request) {
     const { email } = await request.json();
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
 
+    console.log("[POST] Received verification request for:", normalizedEmail);
+
     if (!normalizedEmail || !normalizedEmail.endsWith("@hcdc.edu.ph")) {
+      console.log("[POST] Invalid email domain");
       return NextResponse.json(
         { error: "Only @hcdc.edu.ph email addresses are allowed" },
         { status: 400 }
@@ -102,11 +105,14 @@ export async function POST(request: Request) {
     const cookieValue = createVerificationCookieValue(verificationEntry);
     const cookieHeader = createCookieHeader(cookieValue, CODE_TTL_MS / 1000);
 
+    console.log("[POST] Generated code for email, sending email...");
+
     try {
       const emailUser = process.env.EMAIL_USER?.trim();
       const emailPassword = process.env.EMAIL_PASSWORD?.replace(/\s+/g, "").trim();
 
       if (!emailUser || !emailPassword) {
+        console.log("[POST] Email credentials not configured");
         return NextResponse.json(
           { error: "Email sender is not configured. Set EMAIL_USER and EMAIL_PASSWORD in .env.local." },
           { status: 500 }
@@ -120,6 +126,8 @@ export async function POST(request: Request) {
           pass: emailPassword,
         },
       });
+
+      console.log("[POST] Sending email to:", normalizedEmail, "Code:", code);
 
       await transporter.sendMail({
         from: `CETVOTE <${emailUser}>`,
@@ -166,6 +174,8 @@ export async function POST(request: Request) {
         `,
       });
 
+      console.log("[POST] Email sent successfully, returning response with payload");
+
       return NextResponse.json(
         {
           success: true,
@@ -175,14 +185,14 @@ export async function POST(request: Request) {
         { headers: { "Set-Cookie": cookieHeader } }
       );
     } catch (emailError) {
-      console.error("Email sending error:", emailError);
+      console.error("[POST] Email sending error:", emailError);
       return NextResponse.json(
         { error: "Unable to send verification code email. Check EMAIL_USER/EMAIL_PASSWORD (Gmail App Password) and try again." },
         { status: 500 }
       );
     }
   } catch (error) {
-    console.error("Error:", error);
+    console.error("[POST] Error:", error);
     return NextResponse.json(
       { error: "Failed to send verification code" },
       { status: 500 }
@@ -196,7 +206,11 @@ export async function PUT(request: Request) {
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
     const normalizedCode = String(code ?? "").trim();
 
+    console.log("[PUT] Received verification for:", normalizedEmail, "Code:", normalizedCode);
+    console.log("[PUT] Payload provided:", !!verificationPayload);
+
     if (!/^\d{6}$/.test(normalizedCode)) {
+      console.log("[PUT] Invalid code format");
       return NextResponse.json(
         { error: "Verification code must be exactly 6 digits" },
         { status: 400 }
@@ -204,13 +218,18 @@ export async function PUT(request: Request) {
     }
 
     let stored = parseVerificationCookieValue(verificationPayload);
+    console.log("[PUT] Parsed payload from request:", !!stored);
+    
     if (!stored) {
       const cookieHeader = request.headers.get("cookie");
+      console.log("[PUT] Cookie header:", cookieHeader ? "present" : "missing");
       const cookies = parseCookies(cookieHeader);
       stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
+      console.log("[PUT] Parsed payload from cookies:", !!stored);
     }
 
     if (!stored || stored.email !== normalizedEmail) {
+      console.log("[PUT] No stored entry or email mismatch");
       return NextResponse.json(
         { error: "No verification code found for this email" },
         { status: 400, headers: { "Set-Cookie": clearCookieHeader() } }
@@ -219,6 +238,7 @@ export async function PUT(request: Request) {
 
     if (stored.lockedUntil && Date.now() < stored.lockedUntil) {
       const retryAfterSeconds = Math.ceil((stored.lockedUntil - Date.now()) / 1000);
+      console.log("[PUT] Account locked, retry in", retryAfterSeconds, "seconds");
       return NextResponse.json(
         { error: `Too many attempts. Try again in ${retryAfterSeconds}s.` },
         { status: 429, headers: { "Set-Cookie": createCookieHeader(createVerificationCookieValue(stored), Math.max(Math.ceil((stored.expiresAt - Date.now()) / 1000), 1)) } }
@@ -226,6 +246,7 @@ export async function PUT(request: Request) {
     }
 
     if (Date.now() > stored.expiresAt) {
+      console.log("[PUT] Code expired");
       return NextResponse.json(
         { error: "Verification code has expired" },
         { status: 400, headers: { "Set-Cookie": clearCookieHeader() } }
@@ -233,9 +254,12 @@ export async function PUT(request: Request) {
     }
 
     const computedHash = hashVerificationCode(normalizedEmail, normalizedCode, stored.salt);
+    console.log("[PUT] Comparing hashes - Match:", safeCompareHashes(stored.codeHash, computedHash));
+    
     if (!safeCompareHashes(stored.codeHash, computedHash)) {
       const updatedAttempts = stored.attempts + 1;
       const attemptsLeft = Math.max(MAX_VERIFY_ATTEMPTS - updatedAttempts, 0);
+      console.log("[PUT] Hash mismatch, attempts:", updatedAttempts);
       const updatedStored: VerificationEntry = {
         ...stored,
         attempts: updatedAttempts,
@@ -257,6 +281,7 @@ export async function PUT(request: Request) {
       );
     }
 
+    console.log("[PUT] Code verified successfully");
     return NextResponse.json(
       {
         success: true,

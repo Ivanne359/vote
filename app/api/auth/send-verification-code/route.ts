@@ -12,13 +12,7 @@ const MAX_VERIFY_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
 const VERIFICATION_STORE_PATH = path.join(process.cwd(), ".verification-codes.json");
 
-const isDevFileStore = process.env.NODE_ENV !== "production";
-
 const loadVerificationCodesFromDisk = (): Map<string, VerificationEntry> => {
-  if (!isDevFileStore) {
-    return new Map();
-  }
-
   try {
     if (!fs.existsSync(VERIFICATION_STORE_PATH)) {
       return new Map();
@@ -34,10 +28,6 @@ const loadVerificationCodesFromDisk = (): Map<string, VerificationEntry> => {
 };
 
 const saveVerificationCodesToDisk = (codes: Map<string, VerificationEntry>) => {
-  if (!isDevFileStore) {
-    return;
-  }
-
   try {
     fs.writeFileSync(VERIFICATION_STORE_PATH, JSON.stringify(Array.from(codes.entries())), "utf8");
   } catch (error) {

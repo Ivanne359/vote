@@ -264,12 +264,6 @@ export default function VoteLoginPage() {
     }
   };
 
-  useEffect(() => {
-    if (!loading && user && !showVerificationModal && !showGoogleIdWizard) {
-      router.push("/vote/candidate");
-    }
-  }, [user, loading, router, showVerificationModal, showGoogleIdWizard]);
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50">

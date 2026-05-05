@@ -37,7 +37,7 @@ export default function AdminElectionPage() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(new Date()), 30 * 1000);
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 

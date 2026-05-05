@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
 import Link from "next/link"
 import { useRouter } from "next/navigation";
 import Navbar from "../components/Navbar";
+import LeadingCandidates from "../components/LeadingCandidates";
 import { ELECTION_POSITIONS, resolveElectionWindow, subscribeCandidates, subscribeElectionSettings, type CandidateRecord, type ElectionSettings } from "@/lib/adminRealtime";
 import {
   Megaphone,
@@ -105,6 +106,7 @@ export default function HomePage() {
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<
     (typeof ANNOUNCEMENTS)[0] | null
   >(null);
+  const [showLeadingCandidatesModal, setShowLeadingCandidatesModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [hasReadPrivacy, setHasReadPrivacy] = useState(false);
   const [privacyAgreed, setPrivacyAgreed] = useState(false);
@@ -333,11 +335,16 @@ export default function HomePage() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={openPrivacyModal}
+              onClick={() => isVotingOpen && setShowLeadingCandidatesModal(true)}
               disabled={!isVotingOpen}
-              className="px-6 py-3 rounded-2xl bg-gray-50 text-gray-900 text-xs font-black uppercase tracking-tight hover:bg-gray-100 transition-all flex items-center gap-2 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500"
+              aria-disabled={!isVotingOpen}
+              className={`px-8 py-3 rounded-2xl font-black uppercase tracking-tight transition-all flex items-center gap-2 ${
+                isVotingOpen
+                  ? "bg-gradient-to-r from-[#f05a28] to-orange-400 text-white hover:shadow-lg"
+                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
+              }`}
             >
-              Candidate Page <ChevronRight size={16} />
+              View Live Results
             </button>
           </div>
         </div>
@@ -373,6 +380,51 @@ export default function HomePage() {
                     </p>
                   </>
                 )}
+
+                      {showLeadingCandidatesModal && (
+                        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 md:p-6">
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 bg-black/70 backdrop-blur-xl"
+                            onClick={() => setShowLeadingCandidatesModal(false)}
+                          />
+
+                          <motion.div
+                            initial={{ scale: 0.92, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.95, opacity: 0, y: 10 }}
+                            className="relative w-full max-w-6xl bg-white rounded-[2.5rem] overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.25)] max-h-[90vh] overflow-y-auto"
+                          >
+                            <div className="h-2 w-full bg-gradient-to-r from-[#f05a28] to-orange-400" />
+
+                            <div className="p-8 md:p-10">
+                              <div className="flex items-start justify-between gap-4 mb-8">
+                                <div>
+                                  <div className="flex items-center gap-3 mb-3">
+                                    <span className="h-0.5 w-10 bg-[#f05a28]" />
+                                    <p className="text-[#f05a28] text-[10px] font-black uppercase tracking-[0.35em]">
+                                      Live Results
+                                    </p>
+                                  </div>
+                                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter text-gray-900 italic uppercase">
+                                    Leading Candidates
+                                  </h2>
+                                </div>
+                                <button
+                                  onClick={() => setShowLeadingCandidatesModal(false)}
+                                  className="w-12 h-12 rounded-2xl bg-gray-50 hover:bg-gray-100 flex items-center justify-center text-gray-700 border border-gray-100 flex-shrink-0"
+                                >
+                                  <X size={20} />
+                                </button>
+                              </div>
+
+                              <LeadingCandidates variant="voter" showHeader={false} />
+                            </div>
+                          </motion.div>
+                        </div>
+                      )}
               </div>
               <div className="rounded-3xl bg-white/90 px-5 py-4 text-right shadow-sm">
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-gray-400">Current time</p>

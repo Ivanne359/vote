@@ -1,7 +1,5 @@
 "use client";
-
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence, useScroll, useSpring } from "framer-motion";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import Navbar from "../../components/Navbar";
@@ -25,6 +23,7 @@ import {
 	User,
 	AlertCircle,
 } from "lucide-react";
+import { motion, useScroll, useSpring, AnimatePresence } from "framer-motion";
 import { collection, doc, onSnapshot, runTransaction, serverTimestamp, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -98,7 +97,7 @@ export default function CandidatesPage() {
 	const [hasReadTerms, setHasReadTerms] = useState(false);
 
 	useEffect(() => {
-		const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
+		const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
 		return () => window.clearInterval(timer);
 	}, []);
 
@@ -390,8 +389,19 @@ export default function CandidatesPage() {
 		setStep("ballot");
 		if (typeof window !== "undefined") {
 			localStorage.setItem(STEP_STORAGE_KEY, "ballot");
+			localStorage.setItem("voterName", formData.name);
+			localStorage.setItem("voterId", formData.idNumber);
 		}
 	};
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			localStorage.setItem(STEP_STORAGE_KEY, step);
+		} catch {
+			// ignore storage errors
+		}
+	}, [step]);
 
 	const handleAbstain = useCallback((position: string) => {
 		setSelectedCandidates((prev) => ({
@@ -692,7 +702,7 @@ export default function CandidatesPage() {
 															const count = Array.isArray(selection) ? selection.length : 0;
 															return count > 0 ? `Selected ${count}/2` : "Required Selection (2)";
 														}
-														return selectedCandidates[pos] ? "Selection Captured" : "Required Selection";
+														return selectedCandidates[pos] ? "Selected" : "Required Selection";
 													})()}
 												</p>
 											</div>

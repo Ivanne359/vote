@@ -16,8 +16,13 @@ export default function VoteLayout({
   const router = useRouter();
   const [accessChecked, setAccessChecked] = useState(false);
   const [canAccess, setCanAccess] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // Ensure we don't render differing content between server and client
+    // to avoid hydration mismatches. Only render after client mount.
+    setMounted(true);
+
     const validateAccess = async () => {
       if (loading) {
         return;
@@ -60,6 +65,10 @@ export default function VoteLayout({
 
     void validateAccess();
   }, [user, loading, router]);
+
+  if (!mounted) {
+    return null;
+  }
 
   if (loading) {
     return (

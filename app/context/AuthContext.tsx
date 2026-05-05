@@ -18,13 +18,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(!auth ? false : true);
 
   useEffect(() => {
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
+    if (!auth) return;
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -61,17 +58,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       let result;
       if (isMobile) {
-        // Use redirect flow for mobile devices
+        // Use redirect flow for mobile devices or when popups are blocked
         const provider = new GoogleAuthProvider();
         provider.addScope('profile');
         provider.addScope('email');
         await signInWithRedirect(auth, provider);
-        // This will redirect the user, so we return null here
-        // The result will be handled in the useEffect that listens for auth state changes
         return null;
-      } else {
-        // Use popup flow for desktop
+      }
+
+      try {
         result = await signInWithPopup(auth, googleProvider);
+      } catch {
+        // Fallback to redirect flow for browsers that block popup windows
+        await signInWithRedirect(auth, googleProvider);
+        return null;
       }
 
       const email = result.user.email;

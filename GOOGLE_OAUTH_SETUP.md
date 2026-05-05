@@ -104,6 +104,12 @@ import GoogleUserProfile from "@/app/components/GoogleUserProfile";
 - Ensure all Firebase environment variables are set
 - Check `.env.local` has correct values
 
+### "Access blocked: project request does not comply with Google’s policies"
+- In Google Cloud Console, verify your OAuth consent screen is set correctly
+- If your OAuth app is in testing mode, add your Google account as a tester
+- Make sure the redirect URI and authorized domains exactly match your app domain
+- For production, set the consent screen to External or publish the app if required
+
 ## Security Considerations
 
 ✅ OAuth 2.0 tokens are handled by Firebase  

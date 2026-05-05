@@ -67,8 +67,12 @@ export default function VoteLoginPage() {
 
     try {
       const signedEmail = await signInWithGoogle(false);
-      const currentUser = auth?.currentUser;
+      if (signedEmail === null) {
+        // Mobile redirect flow started; wait for the next auth state change after redirect.
+        return;
+      }
 
+      const currentUser = auth?.currentUser;
       if (!signedEmail || !currentUser?.uid) {
         throw new Error("Failed to get email from Google account.");
       }
@@ -263,6 +267,12 @@ export default function VoteLoginPage() {
       setError(errorMessage);
     }
   };
+
+  useEffect(() => {
+    if (!loading && user && !showVerificationModal && !showGoogleIdWizard) {
+      router.push("/vote/candidate");
+    }
+  }, [user, loading, router, showVerificationModal, showGoogleIdWizard]);
 
   if (loading) {
     return (

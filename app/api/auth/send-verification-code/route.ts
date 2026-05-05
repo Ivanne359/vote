@@ -1,11 +1,51 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import fs from "fs";
+import path from "path";
 
 const CODE_TTL_MS = 3 * 60 * 1000; // 3 minutes
 const RESEND_COOLDOWN_MS = 30 * 1000; // 30 seconds
 const MAX_VERIFY_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+const VERIFICATION_STORE_PATH = path.join(process.cwd(), ".verification-codes.json");
+
+const isDevFileStore = process.env.NODE_ENV !== "production";
+
+const loadVerificationCodesFromDisk = (): Map<string, VerificationEntry> => {
+  if (!isDevFileStore) {
+    return new Map();
+  }
+
+  try {
+    if (!fs.existsSync(VERIFICATION_STORE_PATH)) {
+      return new Map();
+    }
+
+    const raw = fs.readFileSync(VERIFICATION_STORE_PATH, "utf8");
+    const data = JSON.parse(raw) as Array<[string, VerificationEntry]>;
+    return new Map(data);
+  } catch (error) {
+    console.error("Failed to load verification code store:", error);
+    return new Map();
+  }
+};
+
+const saveVerificationCodesToDisk = (codes: Map<string, VerificationEntry>) => {
+  if (!isDevFileStore) {
+    return;
+  }
+
+  try {
+    fs.writeFileSync(VERIFICATION_STORE_PATH, JSON.stringify(Array.from(codes.entries())), "utf8");
+  } catch (error) {
+    console.error("Failed to save verification code store:", error);
+  }
+};
+
+const generateVerificationCode = (): string => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 type VerificationEntry = {
   codeHash: string;
@@ -38,10 +78,16 @@ declare global {
   var __cetvoteVerificationCodes: Map<string, VerificationEntry> | undefined;
 }
 
-const verificationCodes: Map<string, VerificationEntry> = globalThis.__cetvoteVerificationCodes || new Map();
+const inMemoryVerificationCodes: Map<string, VerificationEntry> =
+  globalThis.__cetvoteVerificationCodes || loadVerificationCodesFromDisk();
+
 if (!globalThis.__cetvoteVerificationCodes) {
-  globalThis.__cetvoteVerificationCodes = verificationCodes;
+  globalThis.__cetvoteVerificationCodes = inMemoryVerificationCodes;
 }
+
+const verificationCodes: Map<string, VerificationEntry> = inMemoryVerificationCodes;
+
+const persistMap = () => saveVerificationCodesToDisk(verificationCodes);
 
 export async function POST(request: Request) {
   try {
@@ -80,6 +126,7 @@ export async function POST(request: Request) {
       attempts: 0,
       lockedUntil: null,
     });
+    persistMap();
 
     // Send email with code
     try {
@@ -214,6 +261,7 @@ export async function PUT(request: Request) {
         attempts: updatedAttempts,
         lockedUntil: updatedAttempts >= MAX_VERIFY_ATTEMPTS ? Date.now() + LOCKOUT_MS : null,
       });
+      persistMap();
 
       return NextResponse.json(
         {
@@ -228,6 +276,7 @@ export async function PUT(request: Request) {
 
     // Code is valid, delete it
     verificationCodes.delete(normalizedEmail);
+    persistMap();
 
     return NextResponse.json({
       success: true,

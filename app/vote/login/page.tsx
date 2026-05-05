@@ -73,6 +73,10 @@ export default function VoteLoginPage() {
         throw new Error("Failed to get email from Google account.");
       }
 
+      if (!db) {
+        throw new Error("Firestore is not initialized.");
+      }
+
       const normalizedEmail = signedEmail.toLowerCase();
       const usersRef = collection(db, "users");
       const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
@@ -133,6 +137,10 @@ export default function VoteLoginPage() {
     try {
       if (!auth?.currentUser) {
         throw new Error("Firebase is not configured.");
+      }
+
+      if (!db) {
+        throw new Error("Firestore is not initialized.");
       }
 
       const normalizedEmail = pendingGoogleEmail.toLowerCase();

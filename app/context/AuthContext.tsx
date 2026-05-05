@@ -90,6 +90,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         result = await signInWithPopup(auth, googleProvider);
       }
 
+      console.log("[AuthContext] Google popup result:", result);
+
       const email =
         result?.user?.email ||
         (result?.additionalUserInfo?.profile as { email?: string } | null)?.email ||
@@ -142,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[sendVerificationCode] Sending code to:", email);
       const response = await fetch("/api/auth/send-verification-code", {
         method: "POST",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
@@ -159,8 +161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log("[sendVerificationCode] Saving payload to localStorage");
         saveVerificationPayload(data.verificationPayload);
       } else {
-        console.error("[sendVerificationCode] Server did not return verification payload");
-        throw new Error("Failed to store verification token. Please try again.");
+        console.error("[sendVerificationCode] Server failed to return verification payload");
+        throw new Error("Verification token missing from server response. Please retry.");
       }
 
       return true;
@@ -189,10 +191,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[verifyCode] Email:", email);
       console.log("[verifyCode] Code:", code);
       console.log("[verifyCode] Payload exists:", !!payload);
-
+      
       const response = await fetch("/api/auth/send-verification-code", {
         method: "PUT",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email,

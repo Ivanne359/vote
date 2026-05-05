@@ -186,6 +186,7 @@ export default function AuthPage() {
       // For mobile redirect flow, signedUser will be null
       // The verification flow will be handled by the useEffect above
       if (signedUser === null) {
+        // Mobile redirect initiated, loading will be set to false by the useEffect
         return;
       }
 
@@ -193,6 +194,8 @@ export default function AuthPage() {
       const signedUid = signedUser.uid;
       const signedDisplayName = signedUser.displayName || "Voter";
       const signedPhotoURL = signedUser.photoURL || "";
+
+      console.log("Signed email:", signedEmail);
 
       if (!signedEmail || !signedUid) {
         throw new Error("Failed to get email from Google account.");
@@ -295,7 +298,7 @@ export default function AuthPage() {
 
   const handleGoogleVerificationComplete = async () => {
     try {
-      if (!db) {
+      if (!db || !auth?.currentUser) {
         throw new Error("Firebase is not configured.");
       }
 
@@ -304,14 +307,9 @@ export default function AuthPage() {
       const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
       const userSnapshot = await getDocs(userByEmailQuery);
 
-      const resolvedUid = pendingGoogleUid || auth?.currentUser?.uid;
-      if (!resolvedUid) {
-        throw new Error("Unable to identify signed-in user.");
-      }
-
-      let docId = resolvedUid;
-      let resolvedName = pendingGoogleName || auth?.currentUser?.displayName || "Voter";
-      let resolvedPic = pendingGooglePic || auth?.currentUser?.photoURL || "";
+      let docId = auth.currentUser.uid;
+      let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
+      let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
       let resolvedStudentId = "";
 
       if (userSnapshot.empty) {

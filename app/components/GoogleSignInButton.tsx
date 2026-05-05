@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/context/AuthContext";
 import { Loader2 } from "lucide-react";
 
 export default function GoogleSignInButton() {
-  const router = useRouter();
   const { signInWithGoogle } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,10 +13,7 @@ export default function GoogleSignInButton() {
     setLoading(true);
     setError(null);
     try {
-      const signedUser = await signInWithGoogle();
-      if (signedUser !== null) {
-        router.push("/vote/candidate");
-      }
+      await signInWithGoogle();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to sign in";
       setError(errorMessage);

@@ -33,8 +33,15 @@ const safeCompareHashes = (a: string, b: string): boolean => {
   return timingSafeEqual(aBuffer, bBuffer);
 };
 
-// Store codes temporarily (in production, use Redis or database)
-const verificationCodes: Map<string, VerificationEntry> = new Map();
+declare global {
+  // eslint-disable-next-line no-var
+  var __cetvoteVerificationCodes: Map<string, VerificationEntry> | undefined;
+}
+
+const verificationCodes: Map<string, VerificationEntry> = globalThis.__cetvoteVerificationCodes || new Map();
+if (!globalThis.__cetvoteVerificationCodes) {
+  globalThis.__cetvoteVerificationCodes = verificationCodes;
+}
 
 export async function POST(request: Request) {
   try {

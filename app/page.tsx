@@ -51,6 +51,53 @@ export default function AuthPage() {
   const [googleIdNumber, setGoogleIdNumber] = useState("");
   const [googleIdLoading, setGoogleIdLoading] = useState(false);
 
+  // Handle mobile redirect sign-in completion
+  useEffect(() => {
+    const handleRedirectSignIn = async () => {
+      if (!auth?.currentUser || !db || googleLoading) return;
+
+      try {
+        const currentUser = auth.currentUser;
+        const email = currentUser.email;
+        if (!email) return;
+
+        const normalizedEmail = email.toLowerCase();
+
+        // Check if this is a new sign-in that needs verification
+        const userByEmailQuery = query(
+          collection(db, "users"),
+          where("email", "==", normalizedEmail),
+          limit(1)
+        );
+
+        const userSnapshot = await getDocs(userByEmailQuery);
+
+        if (userSnapshot.empty) {
+          // New user - trigger verification flow
+          console.log("New user from redirect, sending verification code...");
+          await sendVerificationCode(normalizedEmail);
+
+          setPendingGoogleEmail(normalizedEmail);
+          setPendingGoogleUid(currentUser.uid);
+          setPendingGoogleName(currentUser.displayName || "Voter");
+          setPendingGooglePic(currentUser.photoURL || "");
+          setShowVerificationModal(true);
+          setGoogleLoading(false);
+        }
+        // If user exists, they're already verified and should be redirected
+        // This is handled by the existing auth state listener
+      } catch (error) {
+        console.error("Error handling redirect sign-in:", error);
+        setGoogleLoading(false);
+      }
+    };
+
+    // Only run if we have a current user and we're in login mode
+    if (isLogin && auth?.currentUser && !showVerificationModal && !showGoogleIdWizard) {
+      handleRedirectSignIn();
+    }
+  }, [auth?.currentUser, isLogin, showVerificationModal, showGoogleIdWizard, sendVerificationCode, googleLoading]);
+
   const [studentId, setStudentId] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -135,6 +182,14 @@ export default function AuthPage() {
       console.log("Starting Google sign-in...");
       const signedEmail = await signInWithGoogle(true);
       console.log("Signed email:", signedEmail);
+
+      // For mobile redirect flow, signedEmail will be null
+      // The verification flow will be handled by the useEffect above
+      if (signedEmail === null) {
+        // Mobile redirect initiated, loading will be set to false by the useEffect
+        return;
+      }
+
       const currentUser = auth?.currentUser;
       console.log("Current user:", currentUser);
 

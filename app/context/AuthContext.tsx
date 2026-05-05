@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
+import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, getAdditionalUserInfo, GoogleAuthProvider } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 
 interface GoogleSignInResult {
@@ -92,9 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       console.log("[AuthContext] Google popup result:", result);
 
+      const additionalInfo = getAdditionalUserInfo(result);
       const email =
         result?.user?.email ||
-        (result?.additionalUserInfo?.profile as { email?: string } | null)?.email ||
+        (additionalInfo?.profile as { email?: string } | null)?.email ||
         null;
 
       // Validate email domain

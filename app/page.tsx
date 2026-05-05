@@ -200,6 +200,7 @@ export default function AuthPage() {
       setPendingGooglePic(currentUser.photoURL || "");
       setShowVerificationModal(true);
     } catch (err) {
+      console.error("Google sign-in error:", err);
       const firebaseError = err as { code?: string; message?: string };
 
       if (firebaseError?.code === "auth/popup-closed-by-user") {
@@ -212,6 +213,7 @@ export default function AuthPage() {
         await signOut(auth);
       }
       const errorMessage = err instanceof Error ? err.message : "Failed to sign in with Google";
+      console.error("Triggering error:", errorMessage);
       triggerError(errorMessage);
     } finally {
       setGoogleLoading(false);

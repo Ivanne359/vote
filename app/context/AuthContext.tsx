@@ -98,6 +98,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const storageKey = "cetvote_verification_payload";
+
+  const saveVerificationPayload = (payload: string) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(storageKey, payload);
+    }
+  };
+
+  const clearVerificationPayload = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(storageKey);
+    }
+  };
+
+  const getVerificationPayload = (): string | null => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(storageKey);
+  };
+
   const sendVerificationCode = async (email: string): Promise<boolean> => {
     try {
       const response = await fetch("/api/auth/send-verification-code", {
@@ -107,9 +126,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email }),
       });
 
+      const data = await response.json();
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || "Failed to send verification code");
+      }
+
+      if (data.verificationPayload) {
+        saveVerificationPayload(data.verificationPayload);
       }
 
       return true;
@@ -125,20 +148,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({
+          email,
+          code,
+          verificationPayload: getVerificationPayload(),
+        }),
       });
 
+      const data = await response.json();
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || "Failed to verify code");
       }
 
+      clearVerificationPayload();
       return true;
     } catch (error) {
       console.error("Error verifying code:", error);
       throw error;
     }
   };
+
 
   const logout = async () => {
     if (!auth) throw new Error("Firebase Auth is not initialized");

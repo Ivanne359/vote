@@ -170,6 +170,7 @@ export async function POST(request: Request) {
         {
           success: true,
           message: "Verification code sent to your email",
+          verificationPayload: cookieValue,
         },
         { headers: { "Set-Cookie": cookieHeader } }
       );
@@ -191,7 +192,7 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const { email, code } = await request.json();
+    const { email, code, verificationPayload } = await request.json();
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
     const normalizedCode = String(code ?? "").trim();
 
@@ -202,9 +203,12 @@ export async function PUT(request: Request) {
       );
     }
 
-    const cookieHeader = request.headers.get("cookie");
-    const cookies = parseCookies(cookieHeader);
-    const stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
+    let stored = parseVerificationCookieValue(verificationPayload);
+    if (!stored) {
+      const cookieHeader = request.headers.get("cookie");
+      const cookies = parseCookies(cookieHeader);
+      stored = parseVerificationCookieValue(cookies["cetvote_verification"]);
+    }
 
     if (!stored || stored.email !== normalizedEmail) {
       return NextResponse.json(

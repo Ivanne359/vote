@@ -784,6 +784,9 @@ export default function AuthPage() {
             if (auth?.currentUser) {
               await signOut(auth);
             }
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("cetvote_verification_payload");
+            }
             setShowVerificationModal(false);
             setPendingGoogleEmail("");
             setPendingGoogleUid("");

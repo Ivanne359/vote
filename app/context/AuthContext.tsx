@@ -1,7 +1,17 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { User, signInWithPopup, signOut, onAuthStateChanged, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from "firebase/auth";
+import {
+  User,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
+} from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 
 interface AuthContextType {
@@ -62,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const provider = new GoogleAuthProvider();
         provider.addScope('profile');
         provider.addScope('email');
+        await setPersistence(auth, browserLocalPersistence);
         await signInWithRedirect(auth, provider);
         return null;
       }
@@ -69,7 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         result = await signInWithPopup(auth, googleProvider);
       } catch {
-        // Fallback to redirect flow for browsers that block popup windows
+        // Fallback to redirect flow for browsers that block popup windows.
+        // Use local persistence to avoid missing-initial-state errors in restricted browser environments.
+        await setPersistence(auth, browserLocalPersistence);
         await signInWithRedirect(auth, googleProvider);
         return null;
       }

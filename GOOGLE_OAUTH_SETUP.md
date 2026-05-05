@@ -110,6 +110,11 @@ import GoogleUserProfile from "@/app/components/GoogleUserProfile";
 - Make sure the redirect URI and authorized domains exactly match your app domain
 - For production, set the consent screen to External or publish the app if required
 
+### "Unable to process request due to missing initial state"
+- This can happen when `signInWithRedirect` is used and browser sessionStorage is blocked or cleared
+- Firebase redirect flow now uses local persistence to avoid sessionStorage-only state issues
+- If the issue persists, try using a normal browser (not private/incognito) or a browser that allows site storage
+
 ## Security Considerations
 
 ✅ OAuth 2.0 tokens are handled by Firebase  

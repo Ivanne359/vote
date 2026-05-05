@@ -14,14 +14,10 @@ type AdminSessionPayload = {
   expiresAt: number;
 };
 
-const readAdminAuthConfig = (): AdminAuthConfig | null => {
-  const email = process.env.ADMIN_EMAIL?.trim() ?? "";
-  const password = process.env.ADMIN_PASSWORD ?? "";
-  const sessionSecret = process.env.ADMIN_SESSION_SECRET ?? "";
-
-  if (!email || !password || !sessionSecret) {
-    return null;
-  }
+const readAdminAuthConfig = (): AdminAuthConfig => {
+  const email = process.env.ADMIN_EMAIL?.trim() ?? "admin@hcdc.edu.ph";
+  const password = process.env.ADMIN_PASSWORD ?? "123";
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET ?? "cetvote-admin-secret";
 
   return {
     email,

@@ -182,18 +182,11 @@ export default function VoteLoginPage() {
 
       if (/^\d{8}$/.test(savedStudentId)) {
         const accountEmail = String(existingData.email || normalizedEmail).toLowerCase();
-        saveGoogleSession({
-          email: accountEmail,
+        
         await setDoc(
           doc(db, "users", existingDocId),
           {
             uid: existingData.uid || existingDocId,
-
-        if (!hasPasswordProvider()) {
-          openPasswordSetupModal(accountEmail, docId, "/vote/candidate");
-          return;
-        }
-
             email: accountEmail,
             googleEmail: normalizedEmail,
             googleUid: currentUser.uid,
@@ -213,7 +206,7 @@ export default function VoteLoginPage() {
         });
 
         if (!hasPasswordProvider()) {
-          openPasswordSetupModal(accountEmail, userDocId, "/vote/candidate");
+          openPasswordSetupModal(accountEmail, existingDocId, "/vote/candidate");
           return;
         }
 

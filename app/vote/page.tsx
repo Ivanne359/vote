@@ -33,6 +33,7 @@ const ANNOUNCEMENTS = [
     badge: "Important",
     accent: "from-[#f05a28] to-orange-400",
     icon: Megaphone,
+    image: undefined,
     stats: [
       { label: "Fee", value: "₱50" },
     ],
@@ -51,6 +52,7 @@ const ANNOUNCEMENTS = [
     badge: "Upcoming Event",
     accent: "from-orange-500 to-amber-400",
     icon: Trophy,
+    image: undefined,
     stats: [
       { label: "Team", value: "Growling Tigers" },
       { label: "Event", value: "CrossBlazers Cup 2026" },
@@ -79,6 +81,7 @@ This season, they’re showcasing the power of the stripe and the relentless nat
     badge: "Limited Stock",
     accent: "from-gray-900 to-gray-700",
     icon: Pin,
+    image: undefined,
     stats: [
       { label: "Price", value: "₱25" },
       { label: "Pickup", value: "CH403" },

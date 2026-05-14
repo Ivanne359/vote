@@ -10,9 +10,13 @@ import { Poppins } from 'next/font/google';
 
 import { auth, db } from '@/lib/firebase';
 import { useAuth } from '@/app/context/AuthContext';
+import ForgotPasswordModal from '@/app/components/ForgotPasswordModal';
+import PasswordSetupModal from '@/app/components/PasswordSetupModal';
 import VerificationCodeModal from '@/app/components/VerificationCodeModal';
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  linkWithCredential,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
@@ -53,6 +57,12 @@ export default function AuthPage() {
   const [googleIdNumber, setGoogleIdNumber] = useState("");
   const [googleIdLoading, setGoogleIdLoading] = useState(false);
   const [googleRedirectPending, setGoogleRedirectPending] = useState(false);
+  const [showPasswordSetupModal, setShowPasswordSetupModal] = useState(false);
+  const [pendingPasswordEmail, setPendingPasswordEmail] = useState("");
+  const [pendingPasswordDocId, setPendingPasswordDocId] = useState("");
+  const [passwordSetupRoute, setPasswordSetupRoute] = useState("/vote");
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+  const [resetPasswordEmail, setResetPasswordEmail] = useState("");
 
   const [studentId, setStudentId] = useState("");
   const [fullName, setFullName] = useState("");
@@ -131,6 +141,123 @@ export default function AuthPage() {
     setGoogleRedirectPending(false);
   };
 
+  const hasPasswordProvider = () =>
+    auth?.currentUser?.providerData.some((provider) => provider.providerId === "password") ?? false;
+
+  const openPasswordSetupModal = (email: string, docId: string, route: string) => {
+    setPendingPasswordEmail(email.toLowerCase());
+    setPendingPasswordDocId(docId);
+    setPasswordSetupRoute(route);
+    setShowPasswordSetupModal(true);
+  };
+
+  const finalizePasswordSetup = async (passwordValue: string) => {
+    if (!auth?.currentUser) {
+      throw new Error("Firebase Auth is not initialized.");
+    }
+
+    if (!db) {
+      throw new Error("Firebase is not configured.");
+    }
+
+    const accountEmail = pendingPasswordEmail || auth.currentUser.email || "";
+    if (!accountEmail) {
+      throw new Error("Missing account email.");
+    }
+
+    if (!hasPasswordProvider()) {
+      const credential = EmailAuthProvider.credential(accountEmail, passwordValue);
+      await linkWithCredential(auth.currentUser, credential);
+    }
+
+    const docId = pendingPasswordDocId || auth.currentUser.uid;
+    await setDoc(
+      doc(db, "users", docId),
+      {
+        uid: docId,
+        email: accountEmail.toLowerCase(),
+        passwordLinkedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+
+    setShowPasswordSetupModal(false);
+    setPendingPasswordEmail("");
+    setPendingPasswordDocId("");
+    clearGoogleRedirectPending();
+    router.push(passwordSetupRoute);
+  };
+
+  const cancelPasswordSetup = async () => {
+    setShowPasswordSetupModal(false);
+    setPendingPasswordEmail("");
+    setPendingPasswordDocId("");
+    setResetPasswordEmail("");
+    clearGoogleRedirectPending();
+    if (auth?.currentUser) {
+      await signOut(auth);
+    }
+  };
+
+  const handleForgotPasswordVerified = (verifiedEmail: string) => {
+    setResetPasswordEmail(verifiedEmail.toLowerCase());
+    setShowForgotPasswordModal(false);
+    setShowPasswordSetupModal(true);
+  };
+
+  const handleResetPasswordSubmit = async (newPassword: string) => {
+    const targetEmail = resetPasswordEmail.trim().toLowerCase();
+
+    if (!targetEmail) {
+      throw new Error("Missing email for password reset.");
+    }
+
+    const response = await fetch("/api/auth/reset-password", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: targetEmail, password: newPassword }),
+    });
+
+    const data = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to reset password");
+    }
+
+    setShowPasswordSetupModal(false);
+    setResetPasswordEmail("");
+    setSuccessMsg("Password reset successfully. You can now log in with your new password.");
+    setPassword("");
+    setIsLogin(true);
+    setShowForgotPasswordModal(false);
+  };
+
+  const findGoogleLinkedUser = async (normalizedEmail: string) => {
+    if (!db) {
+      return null;
+    }
+
+    const usersRef = collection(db, "users");
+    const byEmailSnapshot = await getDocs(
+      query(usersRef, where("email", "==", normalizedEmail), limit(1))
+    );
+
+    if (!byEmailSnapshot.empty) {
+      return byEmailSnapshot.docs[0];
+    }
+
+    const byGoogleEmailSnapshot = await getDocs(
+      query(usersRef, where("googleEmail", "==", normalizedEmail), limit(1))
+    );
+
+    if (!byGoogleEmailSnapshot.empty) {
+      return byGoogleEmailSnapshot.docs[0];
+    }
+
+    return null;
+  };
+
   const completeGoogleSignInFlow = async (signedEmail: string) => {
     const currentUser = auth?.currentUser;
 
@@ -143,45 +270,43 @@ export default function AuthPage() {
     }
 
     const normalizedEmail = signedEmail.toLowerCase();
-    const userByEmailQuery = query(
-      collection(db, "users"),
-      where("email", "==", normalizedEmail),
-      limit(1)
-    );
-    const userSnapshot = await getDocs(userByEmailQuery);
+    const userSnapshot = await findGoogleLinkedUser(normalizedEmail);
 
-    if (!userSnapshot.empty) {
-      const existingData = userSnapshot.docs[0].data();
+    if (userSnapshot) {
+      const existingData = userSnapshot.data();
       const savedStudentId = String(existingData.studentId || "");
       const savedName = String(existingData.fullName || existingData.name || currentUser.displayName || "Voter");
       const savedPic = String(existingData.profilePic || currentUser.photoURL || "");
 
       if (/^\d{8}$/.test(savedStudentId)) {
+        const accountEmail = String(existingData.email || normalizedEmail).toLowerCase();
+        const userDocId = userSnapshot.id;
+
+        await setDoc(
+          doc(db, "users", userSnapshot.id),
+          {
+            uid: existingData.uid || userSnapshot.id,
+            email: accountEmail,
+            googleEmail: normalizedEmail,
+            googleUid: currentUser.uid,
+            fullName: savedName,
+            profilePic: savedPic || null,
+            provider: "google",
+            googleVerifiedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+
         saveGoogleSession({
-          email: normalizedEmail,
+          email: accountEmail,
           fullName: savedName,
           studentId: savedStudentId,
           profilePic: savedPic,
         });
 
-        if (!existingData.provider) {
-          await setDoc(
-            doc(db, "users", userSnapshot.docs[0].id),
-            {
-              provider: "google",
-              email: normalizedEmail,
-              fullName: savedName,
-              profilePic: savedPic || null,
-              googleVerifiedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          );
-        } else {
-          await setDoc(
-            doc(db, "users", userSnapshot.docs[0].id),
-            { googleVerifiedAt: new Date().toISOString() },
-            { merge: true }
-          );
+        if (!hasPasswordProvider()) {
+          openPasswordSetupModal(accountEmail, userDocId, "/vote");
+          return;
         }
 
         clearGoogleRedirectPending();
@@ -202,7 +327,7 @@ export default function AuthPage() {
   };
 
   useEffect(() => {
-    if (!googleRedirectPending || showVerificationModal || showGoogleIdWizard) {
+    if (!googleRedirectPending || showVerificationModal || showGoogleIdWizard || showPasswordSetupModal) {
       return;
     }
 
@@ -212,7 +337,7 @@ export default function AuthPage() {
     }
 
     void completeGoogleSignInFlow(currentUser.email);
-  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal]);
+  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal, showPasswordSetupModal]);
 
   const handleGoogleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "");
@@ -266,19 +391,19 @@ export default function AuthPage() {
       }
 
       const normalizedEmail = pendingGoogleEmail.toLowerCase();
-      const usersRef = collection(db, "users");
-      const userByEmailQuery = query(usersRef, where("email", "==", normalizedEmail), limit(1));
-      const userSnapshot = await getDocs(userByEmailQuery);
+      const userSnapshot = await findGoogleLinkedUser(normalizedEmail);
 
       let docId = auth.currentUser.uid;
       let resolvedName = pendingGoogleName || auth.currentUser.displayName || "Voter";
       let resolvedPic = pendingGooglePic || auth.currentUser.photoURL || "";
       let resolvedStudentId = "";
 
-      if (userSnapshot.empty) {
+      if (!userSnapshot) {
         await setDoc(doc(db, "users", docId), {
           uid: docId,
           email: normalizedEmail,
+          googleEmail: normalizedEmail,
+          googleUid: auth.currentUser.uid,
           fullName: resolvedName,
           profilePic: resolvedPic || null,
           createdAt: new Date().toISOString(),
@@ -286,9 +411,8 @@ export default function AuthPage() {
           googleVerifiedAt: new Date().toISOString(),
         }, { merge: true });
       } else {
-        const existingDoc = userSnapshot.docs[0];
-        const existingData = existingDoc.data();
-        docId = existingDoc.id;
+        const existingData = userSnapshot.data();
+        docId = userSnapshot.id;
         resolvedName = (existingData.fullName || existingData.name || resolvedName) as string;
         resolvedPic = (existingData.profilePic || resolvedPic || "") as string;
         resolvedStudentId = (existingData.studentId || "") as string;
@@ -296,6 +420,17 @@ export default function AuthPage() {
         if (!existingData.uid) {
           await setDoc(doc(db, "users", docId), { uid: docId }, { merge: true });
         }
+
+        await setDoc(
+          doc(db, "users", docId),
+          {
+            googleEmail: normalizedEmail,
+            googleUid: auth.currentUser.uid,
+            provider: "google",
+            googleVerifiedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
       }
 
       setShowVerificationModal(false);
@@ -304,12 +439,19 @@ export default function AuthPage() {
       setPendingGooglePic(resolvedPic);
 
       if (resolvedStudentId && resolvedStudentId.length === 8) {
+        const accountEmail = String((userSnapshot?.data()?.email || normalizedEmail)).toLowerCase();
         saveGoogleSession({
-          email: normalizedEmail,
+          email: accountEmail,
           fullName: resolvedName,
           studentId: resolvedStudentId,
           profilePic: resolvedPic,
         });
+
+        if (!hasPasswordProvider()) {
+          openPasswordSetupModal(accountEmail, docId, "/vote");
+          return;
+        }
+
         clearGoogleRedirectPending();
         router.push('/vote');
         return;
@@ -341,22 +483,21 @@ export default function AuthPage() {
       const usersRef = collection(db, "users");
       const studentIdQuery = query(usersRef, where("studentId", "==", googleIdNumber), limit(1));
       const existingStudentId = await getDocs(studentIdQuery);
-      const takenByAnother = existingStudentId.docs.some((item) => item.id !== pendingGoogleUid);
-
-      if (takenByAnother) {
-        throw new Error("Student ID is already registered.");
-      }
-
-      const userDocRef = doc(db, "users", pendingGoogleUid);
+      const userDocRef = existingStudentId.empty
+        ? doc(db, "users", pendingGoogleUid)
+        : doc(db, "users", existingStudentId.docs[0].id);
       const userDocSnapshot = await getDoc(userDocRef);
       const currentData = userDocSnapshot.exists() ? userDocSnapshot.data() : {};
 
       const finalName = (currentData.fullName || currentData.name || pendingGoogleName || "Voter") as string;
       const finalPic = (currentData.profilePic || pendingGooglePic || "") as string;
+      const finalEmail = String(currentData.email || pendingGoogleEmail).toLowerCase();
 
       await setDoc(userDocRef, {
-        uid: pendingGoogleUid,
-        email: pendingGoogleEmail.toLowerCase(),
+        uid: currentData.uid || pendingGoogleUid,
+        email: finalEmail,
+        googleEmail: pendingGoogleEmail.toLowerCase(),
+        googleUid: pendingGoogleUid,
         fullName: finalName,
         profilePic: finalPic || null,
         studentId: googleIdNumber,
@@ -366,11 +507,17 @@ export default function AuthPage() {
       }, { merge: true });
 
       saveGoogleSession({
-        email: pendingGoogleEmail,
+        email: finalEmail,
         fullName: finalName,
         studentId: googleIdNumber,
         profilePic: finalPic,
       });
+
+      if (!hasPasswordProvider()) {
+        setShowGoogleIdWizard(false);
+        openPasswordSetupModal(finalEmail, userDocRef.id, "/vote");
+        return;
+      }
 
       setShowGoogleIdWizard(false);
       clearGoogleRedirectPending();
@@ -631,6 +778,16 @@ export default function AuthPage() {
                     </button>
                   </div>
 
+                  {isLogin && (
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPasswordModal(true)}
+                      className="mt-2 ml-auto block text-xs font-bold text-[#f05a28] hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+
                   {!isLogin && password.length > 0 && (
                     <div className="mt-3 rounded-xl border border-orange-100 bg-orange-50/40 p-3 space-y-2">
                       <div className="flex items-center justify-between">
@@ -813,6 +970,25 @@ export default function AuthPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {showPasswordSetupModal && (pendingPasswordEmail || resetPasswordEmail) && (
+        <PasswordSetupModal
+          email={pendingPasswordEmail || resetPasswordEmail}
+          onSubmit={resetPasswordEmail ? handleResetPasswordSubmit : finalizePasswordSetup}
+          onCancel={cancelPasswordSetup}
+          mode={resetPasswordEmail ? "reset" : "setup"}
+        />
+      )}
+
+      {showForgotPasswordModal && (
+        <ForgotPasswordModal
+          onVerified={handleForgotPasswordVerified}
+          onCancel={() => {
+            setShowForgotPasswordModal(false);
+            setResetPasswordEmail("");
+          }}
+        />
       )}
 
       

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import {
+  clearPasswordResetVerificationCookie,
+  createPasswordResetVerificationCookie,
+} from "@/lib/passwordResetVerification";
 
 export const runtime = "nodejs";
 
@@ -78,8 +82,9 @@ const clearCookieHeader = (): string => {
 
 export async function POST(request: Request) {
   try {
-    const { email } = await request.json();
+    const { email, purpose } = await request.json();
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
+    const isPasswordReset = purpose === "password-reset";
 
     console.log("[POST] Received verification request for:", normalizedEmail);
 
@@ -132,10 +137,15 @@ export async function POST(request: Request) {
 
       console.log("[POST] Sending email to:", normalizedEmail, "Code:", code);
 
+      const subject = isPasswordReset ? "CETVOTE Password Reset Code" : "CETVOTE Verification Code";
+      const introText = isPasswordReset
+        ? "Use this 6-digit code to reset your CETVOTE password."
+        : "Use this 6-digit code to continue your Google sign-in on CETVOTE.";
+
       await transporter.sendMail({
         from: `CETVOTE <${emailUser}>`,
         to: normalizedEmail,
-        subject: "CETVOTE Verification Code",
+        subject,
         html: `
           <div style="margin:0;background:#f3f4f8;padding:24px 12px;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
             <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 12px 28px rgba(15,23,42,0.12);">
@@ -147,7 +157,7 @@ export async function POST(request: Request) {
               <div style="padding:28px 24px 24px;background:#fff;">
                 <p style="margin:0 0 12px;font-size:15px;color:#4b5563;">Hi,</p>
                 <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#374151;">
-                  Use this 6-digit code to continue your Google sign-in on CETVOTE.
+                  ${introText}
                 </p>
 
                 <div style="margin:0 auto 18px;max-width:320px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:18px 16px;text-align:center;">
@@ -211,9 +221,10 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const { email, code, verificationPayload } = await request.json();
+    const { email, code, verificationPayload, purpose } = await request.json();
     const normalizedEmail = String(email ?? "").trim().toLowerCase();
     const normalizedCode = String(code ?? "").trim();
+    const isPasswordReset = purpose === "password-reset";
 
     console.log("[PUT] Received verification for:", normalizedEmail, "Code:", normalizedCode);
     console.log("[PUT] Payload provided:", !!verificationPayload);
@@ -306,12 +317,17 @@ export async function PUT(request: Request) {
     }
 
     console.log("[PUT] Code verified successfully");
+
+    const resetCookieHeader = isPasswordReset
+      ? createPasswordResetVerificationCookie(normalizedEmail, Math.ceil(CODE_TTL_MS / 1000))
+      : clearPasswordResetVerificationCookie();
+
     return NextResponse.json(
       {
         success: true,
         message: "Email verified successfully",
       },
-      { headers: { "Set-Cookie": clearCookieHeader() } }
+      { headers: { "Set-Cookie": resetCookieHeader } }
     );
   } catch (error) {
     console.error("Error:", error);

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 
 export default function VoteLayout({
   children,
@@ -17,6 +17,53 @@ export default function VoteLayout({
   const [accessChecked, setAccessChecked] = useState(false);
   const [canAccess, setCanAccess] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  const resolveUserRecord = async () => {
+    if (!db || !user) {
+      return null;
+    }
+
+    const directSnapshot = await getDoc(doc(db, "users", user.uid));
+    if (directSnapshot.exists()) {
+      return directSnapshot;
+    }
+
+    if (!user.providerData.some((provider) => provider.providerId === "google.com")) {
+      return null;
+    }
+
+    const usersRef = collection(db, "users");
+    const googleUidSnapshot = await getDocs(
+      query(usersRef, where("googleUid", "==", user.uid), limit(1))
+    );
+
+    if (!googleUidSnapshot.empty) {
+      return googleUidSnapshot.docs[0];
+    }
+
+    const normalizedEmail = user.email?.toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const googleEmailSnapshot = await getDocs(
+      query(usersRef, where("googleEmail", "==", normalizedEmail), limit(1))
+    );
+
+    if (!googleEmailSnapshot.empty) {
+      return googleEmailSnapshot.docs[0];
+    }
+
+    const emailSnapshot = await getDocs(
+      query(usersRef, where("email", "==", normalizedEmail), limit(1))
+    );
+
+    if (!emailSnapshot.empty) {
+      return emailSnapshot.docs[0];
+    }
+
+    return null;
+  };
 
   useEffect(() => {
     // Ensure we don't render differing content between server and client
@@ -49,8 +96,8 @@ export default function VoteLayout({
         return;
       }
 
-      const snapshot = await getDoc(doc(db, "users", user.uid));
-      const data = snapshot.exists() ? snapshot.data() : null;
+      const snapshot = await resolveUserRecord();
+      const data = snapshot && snapshot.exists() ? snapshot.data() : null;
       const studentId = String(data?.studentId || "");
       const verifiedAt = String(data?.googleVerifiedAt || "");
       const isVerified = Boolean(verifiedAt) && /^\d{8}$/.test(studentId);

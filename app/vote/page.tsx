@@ -51,7 +51,6 @@ const ANNOUNCEMENTS = [
     badge: "Upcoming Event",
     accent: "from-orange-500 to-amber-400",
     icon: Trophy,
-    image: "/tigers.jpg",
     stats: [
       { label: "Team", value: "Growling Tigers" },
       { label: "Event", value: "CrossBlazers Cup 2026" },
@@ -285,7 +284,7 @@ export default function HomePage() {
                 disabled={!isVotingOpen}
                 className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-2xl bg-[#f05a28] text-white font-black uppercase tracking-tight shadow-2xl shadow-[#f05a28]/20 hover:scale-[1.02] transition-all disabled:cursor-not-allowed disabled:bg-gray-400 disabled:shadow-none"
               >
-                View Candidates <ArrowRight size={18} />
+                Vote Now <ArrowRight size={18} />
               </button>
 
               <button

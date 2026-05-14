@@ -40,7 +40,7 @@ const poppins = Poppins({
 
 export default function AuthPage() {
   const router = useRouter();
-  const { signInWithGoogle, sendVerificationCode } = useAuth();
+  const { user, signInWithGoogle, sendVerificationCode } = useAuth();
 
   const [isLogin, setIsLogin] = useState(true);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -227,7 +227,7 @@ export default function AuthPage() {
 
     setShowPasswordSetupModal(false);
     setResetPasswordEmail("");
-    setSuccessMsg("Password reset successfully. You can now log in with your new password.");
+    setSuccessMsg("Password reset successfully.");
     setPassword("");
     setIsLogin(true);
     setShowForgotPasswordModal(false);
@@ -327,17 +327,18 @@ export default function AuthPage() {
   };
 
   useEffect(() => {
-    if (!googleRedirectPending || showVerificationModal || showGoogleIdWizard || showPasswordSetupModal) {
+    if (
+      !googleRedirectPending ||
+      showVerificationModal ||
+      showGoogleIdWizard ||
+      showPasswordSetupModal ||
+      !user?.email
+    ) {
       return;
     }
 
-    const currentUser = auth?.currentUser;
-    if (!currentUser?.email) {
-      return;
-    }
-
-    void completeGoogleSignInFlow(currentUser.email);
-  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal, showPasswordSetupModal]);
+    void completeGoogleSignInFlow(user.email);
+  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal, showPasswordSetupModal, user?.email]);
 
   const handleGoogleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "");

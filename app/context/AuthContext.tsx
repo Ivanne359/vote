@@ -63,30 +63,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) throw new Error("Firebase Auth is not initialized");
 
     try {
-      // Detect mobile devices
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent
-      );
-
       let result;
-      if (isMobile) {
-        // Use redirect flow for mobile devices or when popups are blocked
-        const provider = new GoogleAuthProvider();
-        provider.addScope('profile');
-        provider.addScope('email');
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
-        }
-        await setPersistence(auth, browserLocalPersistence);
-        await signInWithRedirect(auth, provider);
-        return null;
-      }
-
       try {
         result = await signInWithPopup(auth, googleProvider);
       } catch {
-        // Fallback to redirect flow for browsers that block popup windows.
-        // Use local persistence to avoid missing-initial-state errors in restricted browser environments.
+        // Fallback to redirect flow when popups are blocked or unavailable.
         if (typeof window !== "undefined") {
           sessionStorage.setItem(GOOGLE_REDIRECT_PENDING_KEY, "1");
         }

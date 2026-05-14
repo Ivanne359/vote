@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/app/context/AuthContext";
 import GoogleSignInButton from "@/app/components/GoogleSignInButton";
@@ -42,6 +42,7 @@ export default function VoteLoginPage() {
   const [pendingPasswordEmail, setPendingPasswordEmail] = useState("");
   const [pendingPasswordDocId, setPendingPasswordDocId] = useState("");
   const [passwordSetupRoute, setPasswordSetupRoute] = useState("/vote/candidate");
+  const handledRedirectRef = useRef(false);
 
   const clearMessages = () => {
     setError(null);
@@ -228,17 +229,20 @@ export default function VoteLoginPage() {
   };
 
   useEffect(() => {
-    if (!googleRedirectPending || showVerificationModal || showGoogleIdWizard || showPasswordSetupModal) {
+    if (
+      handledRedirectRef.current ||
+      !googleRedirectPending ||
+      showVerificationModal ||
+      showGoogleIdWizard ||
+      showPasswordSetupModal ||
+      !user?.email
+    ) {
       return;
     }
 
-    const currentUser = auth?.currentUser;
-    if (!currentUser?.email) {
-      return;
-    }
-
-    void completeGoogleSignInFlow(currentUser.email);
-  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal, showPasswordSetupModal]);
+    handledRedirectRef.current = true;
+    void completeGoogleSignInFlow(user.email);
+  }, [googleRedirectPending, showGoogleIdWizard, showVerificationModal, showPasswordSetupModal, user?.email]);
 
   const handleGoogleIdChange = (e: ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, "");
@@ -250,6 +254,7 @@ export default function VoteLoginPage() {
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     clearMessages();
+    handledRedirectRef.current = false;
 
     try {
       clearGoogleRedirectPending();

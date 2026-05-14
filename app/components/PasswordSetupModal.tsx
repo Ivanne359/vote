@@ -84,7 +84,7 @@ export default function PasswordSetupModal({ email, onSubmit, onCancel, mode = "
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4"
     >
       <motion.div
         initial={{ scale: 0.96, opacity: 0 }}
